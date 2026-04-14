@@ -1,0 +1,34 @@
+Package: concordR
+Title: Concordance-Aware Quality Control for Proteomic Interpretation
+Version: 0.1.0
+Authors@R: person("Artur", "Shvetcov", role = c("aut", "cre"),
+                  email = "a.shvetcov@example.com",
+                  comment = c(ORCID = "0000-0000-0000-0000"))
+Description: Translates an atlas of RNA-protein concordance across human
+    tissues into a practical quality-control layer for proteomic studies.
+    Given a gene list from a proteomics experiment, concordR tells you what
+    you can and cannot conclude: which genes have reliable RNA-protein
+    concordance, which are suppressed at the protein level despite high
+    RNA, whether subcellular localisation is consistent with the measurement
+    compartment, and whether enrichment results survive concordance
+    correction. Built on an integrated atlas spanning 488,190 observations
+    across 11,154 genes, 24 tissues, and 53 cell types.
+License: MIT + file LICENSE
+URL: https://github.com/Art83/concordR
+BugReports: https://github.com/Art83/concordR/issues
+Depends: R (>= 4.1.0)
+Imports:
+    stats,
+    utils,
+    graphics,
+    grDevices
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+VignetteBuilder: knitr
+Config/testthat/edition: 3
