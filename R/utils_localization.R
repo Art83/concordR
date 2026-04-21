@@ -35,7 +35,7 @@
 #' @noRd
 .LOC_COLS <- c("is_secreted", "is_membrane", "is_nuclear",
                "is_cytoplasmic", "is_mitochondrial", "is_er_golgi",
-               "is_cytoskeleton", "is_multilocal")
+               "is_cytoskeleton", "is_projection", "is_multilocal")
 
 
 #' Vectorised plausibility check across a data frame of genes
@@ -59,34 +59,9 @@
 
   apply(atlas_subset[, available, drop = FALSE], 1, function(row) {
     if (all(is.na(row))) return(NA)
+    if (all(row == 0, na.rm = TRUE)) return(FALSE)  # no localisation data
     any(row == 1, na.rm = TRUE)
   })
-}
-
-
-#' Get human-readable localisation label from binary flags
-#'
-#' @param gene_row Named vector or single-row data frame with is_* columns.
-#' @return Character scalar (comma-separated labels).
-#' @keywords internal
-#' @noRd
-.location_label <- function(gene_row) {
-  mapping <- c(
-    is_secreted      = "Secreted",
-    is_membrane      = "Membrane",
-    is_nuclear       = "Nuclear",
-    is_cytoplasmic   = "Cytoplasmic",
-    is_mitochondrial = "Mitochondrial",
-    is_er_golgi      = "ER/Golgi",
-    is_cytoskeleton  = "Cytoskeletal"
-  )
-  present <- names(mapping)[vapply(names(mapping), function(col) {
-    v <- gene_row[[col]]
-    !is.null(v) && length(v) == 1L && !is.na(v) && v == 1
-  }, logical(1))]
-
-  if (length(present) == 0L) return(NA_character_)
-  paste(mapping[present], collapse = ", ")
 }
 
 
@@ -97,7 +72,29 @@
 #' @keywords internal
 #' @noRd
 .location_labels <- function(atlas_subset) {
-  apply(atlas_subset, 1, .location_label)
+  mapping <- c(
+    is_secreted      = "Secreted",
+    is_membrane      = "Membrane",
+    is_nuclear       = "Nuclear",
+    is_cytoplasmic   = "Cytoplasmic",
+    is_mitochondrial = "Mitochondrial",
+    is_er_golgi      = "ER/Golgi",
+    is_cytoskeleton  = "Cytoskeletal",
+    is_projection    = "Cell projection"
+  )
+  # Only look at columns that actually exist in the data
+  cols_to_use <- intersect(names(mapping), colnames(atlas_subset))
+  mat <- as.matrix(atlas_subset[, cols_to_use])
+  
+  # Use apply once across the matrix
+  # which(x == 1) finds the indices of the 'TRUE' values
+  apply(mat, 1, function(row) {
+    # Find which indices are equal to 1 (and not NA)
+    found <- mapping[cols_to_use[which(row == 1)]]
+    
+    if (length(found) == 0) return(NA_character_)
+    paste(found, collapse = ", ")
+  })
 }
 
 

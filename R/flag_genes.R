@@ -83,21 +83,37 @@ flag_genes <- function(genes,
   q <- query_atlas(genes, missing = "keep")
 
   # --- Localisation plausibility (using binary flags) ---
-  q$loc_plausible <- .check_plausibility(q, sample_type)
+  q$loc_plausible <- NA_character_
+  found_idx <- which(q$found)
+  if (length(found_idx) > 0) {
+    q$loc_plausible[found_idx] <- .check_plausibility(q[found_idx, , drop = FALSE])
+  }
 
   # --- Human-readable localisation ---
-  q$localisation <- .location_labels(q)
+  q$localisation <- NA_character_
+  if (length(found_idx) > 0) {
+    q$localisation[found_idx] <- .location_labels(q[found_idx, , drop = FALSE])
+  }
 
   # --- Tissue breadth (protein-based) ---
   q$broad_expression <- !is.na(q$n_tissues) & q$n_tissues > max_breadth
 
   # --- Traffic light ---
-  q$flag <- .assign_flag(q$gene_class, q$loc_plausible)
+  q$is_projection <- if ("is_projection" %in% names(q)) q$is_projection else NA
+  q$flag <- .assign_flag(q$gene_class, q$loc_plausible, q$is_projection)
+  
+  # --- Coverage caveat for projection proteins ---
+  q$caveat <- ifelse(
+    !is.na(q$is_projection) & q$is_projection == 1 &
+      q$gene_class == "consistently_suppressed",
+    "Protein localises to cell projections/axons not captured by IHC",
+    NA_character_
+  )
 
   # --- Select output columns ---
   out_cols <- c("gene_symbol", "gene_class", "protein_confidence",
                 "detection_rate", "localisation", "loc_plausible",
-                "broad_expression", "flag")
+                "broad_expression", "flag", "caveat")
   out_cols <- intersect(out_cols, names(q))
   q[, out_cols, drop = FALSE]
 }
@@ -106,28 +122,31 @@ flag_genes <- function(genes,
 #' Assign traffic-light flag from gene class and localisation
 #' @keywords internal
 #' @noRd
-.assign_flag <- function(gene_class, loc_plausible) {
-  mapply(function(gc, lp) {
+.assign_flag <- function(gene_class, loc_plausible, is_projection) {
+  mapply(function(gc, lp, proj) {
     if (is.na(gc)) return(NA_character_)
-
-    # Suppressed genes are unreliable regardless of localisation
-    if (gc == "consistently_suppressed") return("unreliable")
-
+    
+    # Suppressed genes: temper if projection protein (assay limitation)
+    if (gc == "consistently_suppressed") {
+      if (!is.na(proj) && proj == 1) return("caution")
+      return("unreliable")
+    }
+    
     # Implausible localisation makes any gene unreliable in that context
     if (!is.na(lp) && !lp) return("unreliable")
-
+    
     # Concordant + plausible (or unscored) = reliable
     if (gc == "consistently_concordant") {
       if (is.na(lp) || lp) return("reliable")
       return("caution")
     }
-
+    
     # Variable genes = caution
     if (gc == "variable") return("caution")
-
+    
     # Low expression
     if (gc == "low_expression") return("caution")
-
+    
     NA_character_
-  }, gene_class, loc_plausible, USE.NAMES = FALSE)
+  }, gene_class, loc_plausible, is_projection, USE.NAMES = FALSE)
 }

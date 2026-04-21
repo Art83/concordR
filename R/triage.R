@@ -86,8 +86,12 @@ triage <- function(genes,
 
   # --- Apply verdict logic ---
   q$claim <- claim
+  q$is_projection <- if ("is_projection" %in% names(q)) q$is_projection else 0
+  q$is_projection[is.na(q$is_projection)] <- 0
+  
   verdicts <- mapply(.triage_one,
                      q$gene_class, q$loc_plausible, q$broad_expression,
+                     q$is_projection == 1,
                      MoreArgs = list(claim = claim),
                      SIMPLIFY = FALSE)
 
@@ -133,21 +137,21 @@ triage <- function(genes,
 #' Triage logic for a single gene
 #' @keywords internal
 #' @noRd
-.triage_one <- function(gc, lp, broad, claim) {
+.triage_one <- function(gc, lp, broad, proj, claim) {
   if (is.na(gc))
     return(list(verdict = NA_character_, reason = "Gene not in atlas."))
-
+  
   switch(claim,
-    biomarker      = .triage_biomarker(gc, lp, broad),
-    target         = .triage_target(gc),
-    enrichment_hit = .triage_enrichment(gc, lp)
+         biomarker      = .triage_biomarker(gc, lp, broad, proj),
+         target         = .triage_target(gc, proj),
+         enrichment_hit = .triage_enrichment(gc, lp)
   )
 }
 
 
 #' @keywords internal
 #' @noRd
-.triage_biomarker <- function(gc, lp, broad) {
+.triage_biomarker <- function(gc, lp, broad, proj = FALSE) {
   if (!is.na(lp) && !lp) {
     reason <- "Intracellular protein in extracellular compartment."
     if (broad)
@@ -155,17 +159,17 @@ triage <- function(genes,
                       "provenance unsupported.")
     return(list(verdict = "implausible", reason = reason))
   }
-  if (gc == "consistently_suppressed")
+  if (gc == "consistently_suppressed") {
+    if (proj)
+      return(list(verdict = "questionable",
+                  reason  = paste("Suppressed, but protein localises to",
+                                  "cell projections/axons not captured by",
+                                  "IHC. Suppression may reflect assay",
+                                  "limitation, not translational failure.")))
     return(list(verdict = "questionable",
                 reason  = paste("Suppressed: RNA poorly predicts protein.",
                                 "Protein-level validation required.")))
-  if (broad && gc %in% c("consistently_concordant", "variable"))
-    return(list(verdict = "questionable",
-                reason  = paste("Expressed in many tissues;",
-                                "tissue-specific provenance is weak.")))
-  if (gc == "consistently_concordant")
-    return(list(verdict = "plausible",
-                reason  = "Concordant, localisation-consistent."))
+  }
   if (gc == "variable")
     return(list(verdict = "questionable",
                 reason  = "Variable concordance; context-dependent."))
@@ -175,16 +179,22 @@ triage <- function(genes,
 
 #' @keywords internal
 #' @noRd
-.triage_target <- function(gc) {
-  switch(gc,
-    consistently_concordant = list(
-      verdict = "RNA-supported",
-      reason  = paste("Concordant. RNA reliably predicts protein.",
-                      "RNA-based target evidence is defensible.")),
-    consistently_suppressed = list(
+.triage_target <- function(gc, proj = FALSE) {
+  if (gc == "consistently_suppressed" && proj)
+    return(list(
       verdict = "RNA-unreliable",
-      reason  = paste("Suppressed. RNA does not predict protein.",
-                      "Requires protein-level evidence.")),
+      reason  = paste("Suppressed, but protein localises to projections/axons",
+                      "not captured by IHC. Suppression may reflect assay",
+                      "limitation. Protein-level evidence still required.")))
+  switch(gc,
+         consistently_concordant = list(
+           verdict = "RNA-supported",
+           reason  = paste("Concordant. RNA reliably predicts protein.",
+                           "RNA-based target evidence is defensible.")),
+         consistently_suppressed = list(
+           verdict = "RNA-unreliable",
+           reason  = paste("Suppressed. RNA does not predict protein.",
+                           "Requires protein-level evidence.")),
     variable = list(
       verdict = "caution",
       reason  = paste("Variable. RNA-protein relationship is",
