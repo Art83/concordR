@@ -65,11 +65,13 @@ plot_gene <- function(gene,
                 else if ("tissue" %in% names(gene_data)) "tissue"
                 else stop("No tissue column found.")
 
-  det_col <- if ("detection_rate" %in% names(gene_data)) "detection_rate"
+  det_col <- if ("detect_fraction" %in% names(gene_data)) "detect_fraction"
+             else if ("detection_rate" %in% names(gene_data)) "detection_rate"
              else if ("y_bin" %in% names(gene_data)) "y_bin"
              else NULL
 
-  rna_col <- if ("mean_rna_rank" %in% names(gene_data)) "mean_rna_rank"
+  rna_col <- if ("rna_rank_max" %in% names(gene_data)) "rna_rank_max"
+             else if ("mean_rna_rank" %in% names(gene_data)) "mean_rna_rank"
              else if ("rna_rank" %in% names(gene_data)) "rna_rank"
              else NULL
 

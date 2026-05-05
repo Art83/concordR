@@ -4,7 +4,7 @@
 \alias{flag_genes}
 \title{Flag genes by concordance reliability and compartment plausibility}
 \usage{
-flag_genes(genes, sample_type, max_breadth = 10L)
+flag_genes(genes, sample_type)
 }
 \arguments{
 \item{genes}{Character vector of HGNC gene symbols.}
@@ -15,11 +15,6 @@ were measured. One of \code{"plasma"}, \code{"serum"}, \code{"csf"},
 \code{"nuclear_fraction"}, \code{"mitochondrial_fraction"},
 \code{"membrane_fraction"}. Determines which localisations are
 considered plausible.}
-
-\item{max_breadth}{Integer. Genes detected in more than this many
-tissues (out of 24) are flagged as \code{broad_expression = TRUE},
-indicating they are poor candidates for tissue-specific claims.
-Default \code{10}.}
 }
 \value{
 A data frame with one row per gene, containing:
@@ -28,13 +23,17 @@ A data frame with one row per gene, containing:
 \item{\code{gene_class}}{From the atlas.}
 \item{\code{protein_confidence}}{From the atlas.}
 \item{\code{detection_rate}}{From the atlas.}
+\item{\code{mechanism_tier}}{From the atlas (NA for non-suppressed).}
 \item{\code{localisation}}{Human-readable localisation label.}
 \item{\code{loc_plausible}}{Logical. Is the localisation consistent
 with \code{sample_type}?}
-\item{\code{broad_expression}}{Logical. Detected in > \code{max_breadth}
-tissues.}
+\item{\code{tau}}{Yanai tissue-specificity index.}
+\item{\code{specificity_class}}{Categorical specificity band:
+tissue_specific / tissue_enriched / mixed / broadly_expressed.}
 \item{\code{flag}}{Traffic light: \code{"reliable"}, \code{"caution"},
 or \code{"unreliable"}.}
+\item{\code{caveat}}{Non-NA where additional interpretive context
+applies (projection proteins, broadly expressed genes).}
 }
 }
 \description{
@@ -57,6 +56,11 @@ localisation. RNA evidence is uninformative for this gene.
 Protein-level measurements are required.}
 \item{\code{NA}}{Gene not in atlas.}
 }
+
+Projection proteins (axonal/dendritic) in biofluid contexts (plasma,
+serum, CSF) receive a \code{"caution"} rather than \code{"unreliable"}
+flag because damage-release biology (e.g. NEFL in plasma after axonal
+injury) is a legitimate detection pathway.
 }
 
 \examples{

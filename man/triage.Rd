@@ -2,68 +2,113 @@
 % Please edit documentation in R/triage.R
 \name{triage}
 \alias{triage}
-\title{Triage candidate genes by claimed role and measurement context}
+\title{Triage candidate genes for drug target defensibility}
 \usage{
-triage(genes, claim, sample_type = NULL, max_breadth = 10L)
+triage(genes, sample_type, context_tissue = NULL)
 }
 \arguments{
 \item{genes}{Character vector of HGNC gene symbols.}
 
-\item{claim}{Character. One of \code{"biomarker"}, \code{"target"}, or
-\code{"enrichment_hit"}.}
+\item{sample_type}{Character. The biological compartment where proteins
+were measured. See \code{\link{flag_genes}} for the full list.}
 
-\item{sample_type}{Character. Required for \code{"biomarker"} and
-\code{"enrichment_hit"} claims. See \code{\link{flag_genes}}.}
-
-\item{max_breadth}{Integer. Tissue breadth threshold. Default \code{10}.}
+\item{context_tissue}{Character or \code{NULL}. The tissue claimed as
+the source of the proteomic signal (e.g. \code{"Cerebellum"}). When
+supplied, enables the tissue-of-origin gate using the tissue-resolved
+atlas. The atlas resolves brain into four regions (Caudate,
+Cerebellum, Cerebral cortex, Hippocampus); pass one explicitly.
+Genes absent from the tissue-resolved atlas are not gated.}
 }
 \value{
-A data frame with atlas annotations plus \code{claim},
-\code{verdict}, and \code{reason} columns.
+A data frame with atlas annotations plus
+\code{compartment_rescue}, \code{context_tissue_class},
+\code{context_tissue_detected}, \code{verdict} and \code{reason}.
+The \code{context_tissue_*} columns are \code{NA} when
+\code{context_tissue} is not supplied or the gene is absent from
+the tissue-resolved atlas.
 }
 \description{
-For each gene, checks whether the claimed role — biomarker, therapeutic
-target, or enrichment hit — is consistent with the concordance atlas.
-A nuclear protein claimed as a plasma biomarker is flagged. A
-suppressed-class gene claimed as a drug target from RNA evidence is
-flagged.
+Evaluates whether a gene's nomination as a drug target is defensible
+given the concordance atlas. Drug-target claims demand a coherent
+mechanistic chain: RNA must reliably predict protein, the protein
+must be plausibly detected in the sample compartment that nominated
+it, and (where supplied) the gene must be expressed at protein level
+in the claimed tissue. Failure of any link breaks the chain.
 }
-\section{Verdict logic}{
+\section{Why target-only}{
 
-
-\strong{For \code{claim = "biomarker"}:}
-\describe{
-\item{\code{"plausible"}}{Localisation consistent with sample type.
-Concordant or variable class.}
-\item{\code{"questionable"}}{Plausible localisation but suppressed
-class, or borderline. Requires protein-level validation.}
-\item{\code{"implausible"}}{Intracellular protein in extracellular
-fluid. Presence likely reflects cell death.}
+Earlier versions of \code{triage()} offered separate \code{biomarker}
+and \code{enrichment_hit} modes. Biomarker triage is now handled by
+\code{\link{flag_genes}}. Pathway-level questions are handled by
+\code{\link{audit_enrichment}}. \code{triage()} is reserved for the
+strictest claim — that a gene should be drugged.
 }
 
-\strong{For \code{claim = "target"}:}
-\describe{
-\item{\code{"RNA-supported"}}{Concordant class. RNA reliably predicts
-protein for this gene.}
-\item{\code{"RNA-unreliable"}}{Suppressed class. Target may be valid
-but RNA-only evidence is not defensible.}
-\item{\code{"caution"}}{Variable class. Tissue-context-dependent.}
+\section{Gates (in order of severity)}{
+
+\enumerate{
+\item \strong{Compartment plausibility}: subcellular localisation
+inconsistent with sample compartment. A damage-release rescue
+applies in biofluid contexts (\code{plasma}, \code{serum},
+\code{csf}) for projection-localised proteins (\code{is_projection
+    = 1}), because HPA microscopy systematically under-detects axonal
+and dendritic proteins.
+\item \strong{Tissue-of-origin coherence}: when \code{context_tissue}
+is supplied, gene must be detected at protein level in that tissue.
+Three failure modes are flagged: \code{low_expression} (no RNA, no
+protein), \code{suppressed_in_tissue} (RNA present but no protein),
+and \code{variable_in_tissue} with zero protein detection across
+all cell types in the tissue. Brain is resolved as four regions —
+pass one explicitly (e.g. \code{"Cerebellum"}), not \code{"Brain"}.
+\item \strong{Concordance class}: suppressed class — RNA does not
+predict protein.
+\item \strong{Tissue specificity}: concordant and plausible, but
+broadly expressed across tissues — tissue-of-origin claims (e.g.
+cell-type-specific drug targeting) are unsupported.
 }
 
-\strong{For \code{claim = "enrichment_hit"}:}
+Multiple gates may fail simultaneously. The reported \code{verdict}
+is the most severe failed gate; the \code{reason} string accumulates
+all triggered gates so the full picture is visible. The
+\code{compartment_rescue} column flags genes whose compartment gate
+was rescued by the projection-protein exception.
+}
+
+\section{Verdicts}{
+
 \describe{
-\item{\code{"supported"}}{Concordant and localisation-plausible.}
-\item{\code{"unreliable"}}{Suppressed or localisation-implausible.}
+\item{\code{RNA-supported}}{All gates pass. RNA-based target
+evidence is defensible.}
+\item{\code{RNA-supported_but_broad}}{Concordant and plausible, but
+broadly expressed. Use for non-tissue-specific target claims only.}
+\item{\code{RNA-unreliable}}{Suppressed class. Target may be valid
+but RNA-based evidence is not defensible; protein-level evidence
+required.}
+\item{\code{tissue_origin_mismatch}}{Gene not expressed at protein
+level in claimed tissue.}
+\item{\code{compartment_implausible}}{Subcellular localisation
+inconsistent with sample compartment, with no rescue available.
+The proteomic observation that nominated this target is suspect.}
+\item{\code{caution}}{Variable class or low expression — sparse or
+tissue-context-dependent evidence.}
+\item{\code{NA}}{Gene not in atlas.}
 }
 }
 
 \examples{
 \dontrun{
-triage(c("NEFL", "GFAP", "NRGN", "HDAC1"), "biomarker", "plasma")
-triage(c("AR", "ESR1", "CD274", "TP53"), "target")
+# Drug target audit on a plasma proteomics nomination list
+triage(c("AR", "ESR1", "CD274", "TP53", "HDAC1", "NEFL", "GFAP"),
+       sample_type = "plasma")
+
+# CSF target nominations claimed to originate in the cerebellum
+triage(c("NEFL", "GFAP", "SPANXA1"),
+       sample_type    = "csf",
+       context_tissue = "Cerebellum")
 }
 
 }
 \seealso{
-\code{\link{flag_genes}}, \code{\link{audit_enrichment}}
+\code{\link{flag_genes}} for biomarker-style compartment
+checks; \code{\link{audit_enrichment}} for pathway-level audits.
 }

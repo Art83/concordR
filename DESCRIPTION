@@ -2,8 +2,7 @@ Package: concordR
 Title: Concordance-Aware Quality Control for Proteomic Interpretation
 Version: 0.1.0
 Authors@R: person("Artur", "Shvetcov", role = c("aut", "cre"),
-                  email = "a.shvetcov@example.com",
-                  comment = c(ORCID = "0000-0000-0000-0000"))
+                  email = "shvetsov1983@gmail.com")
 Description: Translates an atlas of RNA-protein concordance across human
     tissues into a practical quality-control layer for proteomic studies.
     Given a gene list from a proteomics experiment, concordR tells you what

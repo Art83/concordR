@@ -1,7 +1,7 @@
 #' concordR: Concordance-Aware Quality Control for Proteomic Interpretation
 #'
 #' An atlas of RNA--protein concordance across human tissues, packaged as
-#' a practical QC layer for proteomic studies. Eight functions, one job:
+#' a practical QC layer for proteomic studies. Seven functions, one job:
 #' given a gene list from a proteomics experiment, tell the user what they
 #' can and cannot conclude from it.
 #'
@@ -20,15 +20,13 @@
 #' \itemize{
 #'   \item \code{\link{audit_enrichment}} — recompute enrichment with
 #'     concordance weights; show what survives correction.
-#'   \item \code{\link{audit_module}} — assess WGCNA module coherence
-#'     against the atlas.
 #' }
 #'
 #' **Interpret your candidates:**
 #' \itemize{
-#'   \item \code{\link{triage}} — classify genes as biomarker-plausible,
-#'     target-RNA-supported, or artifact-likely given a claimed role and
-#'     measurement context.
+#'   \item \code{\link{triage}} — drug-target defensibility audit:
+#'     concordance, compartment plausibility, tissue-of-origin coherence,
+#'     and tissue specificity gates applied per gene.
 #' }
 #'
 #' **Visualise:**
@@ -38,11 +36,10 @@
 #' }
 #'
 #' @section Atlas data:
-#' The atlas is loaded once via \code{\link{load_atlas}} and cached for the
-#' session. It ships as package data for genes with complete annotation;
-#' tissue-resolved profiles are loaded on first use from Zenodo.
+#' Both the gene-level and tissue-resolved atlases ship as internal
+#' package data (\code{R/sysdata.rda}) and are loaded once per session
+#' via \code{\link{load_atlas}}. No network access is required.
 #'
-#' @docType package
 #' @name concordR-package
 #' @keywords internal
 #' @importFrom stats setNames median quantile p.adjust phyper sd cor

@@ -10,7 +10,8 @@ audit_enrichment(
   gene_sets = NULL,
   universe = NULL,
   sample_type = NULL,
-  method = c("remove", "weight"),
+  context_tissue = NULL,
+  method = c("remove"),
   alpha = 0.05
 )
 }
@@ -29,25 +30,35 @@ annotation is performed.}
 \item{sample_type}{Character or \code{NULL}. If supplied, adds
 localisation plausibility scoring per pathway.}
 
+\item{context_tissue}{Character or \code{NULL}. The tissue claimed as
+the source of the enrichment (e.g. \code{"Cerebellum"}). When
+supplied, adds \code{pct_detected_in_context_tissue} column and
+downgrades the verdict to \code{"tissue_unsupported"} for pathways
+where the majority of overlap genes are not detected at protein
+level in the claimed tissue. Brain is resolved as four regions —
+pass one explicitly. See \code{\link{triage}} for details.}
+
 \item{method}{Character. \code{"remove"} (default) excludes suppressed
-genes; \code{"weight"} downweights by protein confidence.}
+genes when recomputing the hypergeometric test.}
 
 \item{alpha}{Numeric. Significance threshold. Default \code{0.05}.}
 }
 \value{
 The original data frame with additional columns:
 \code{n_overlap}, \code{n_concordant}, \code{n_suppressed},
-\code{pct_concordant}, \code{pct_suppressed},
-\code{pct_loc_plausible} (if \code{sample_type} supplied),
-\code{p_corrected}, \code{padj_corrected}, \code{status_change},
-\code{concordance_verdict}.
+\code{n_variable}, \code{pct_concordant}, \code{pct_suppressed},
+\code{pct_broadly_expressed}, \code{pct_loc_plausible} (if
+\code{sample_type} supplied), \code{pct_detected_in_context_tissue}
+(if \code{context_tissue} supplied), \code{p_corrected},
+\code{padj_corrected}, \code{status_change}, \code{concordance_verdict}.
 }
 \description{
 Takes any standard enrichment result — from clusterProfiler, enrichR,
 fgsea, g:Profiler, or a simple data frame — and recomputes significance
-after removing or downweighting genes with poor RNA--protein concordance.
-Where the standard and corrected results agree, the finding is robust.
-Where they diverge, the standard analysis was driven by discordant genes.
+after removing genes with poor RNA--protein concordance. Also surfaces
+the fraction of pathway-driving genes that are broadly expressed across
+tissues, and (when \code{context_tissue} is supplied) the fraction
+detected at protein level in the claimed tissue.
 }
 \section{What this function does}{
 
@@ -56,20 +67,13 @@ For each enriched pathway:
 \item Identifies which genes in the pathway overlap the query list.
 \item Looks up each overlap gene's concordance class and localisation.
 \item Computes: fraction concordant, fraction suppressed, fraction
-localisation-plausible.
+localisation-plausible, fraction broadly expressed, and (if
+\code{context_tissue} supplied) fraction detected at protein level
+in the claimed tissue.
 \item Reruns the hypergeometric test after removing suppressed-class
-genes from both the overlap and the background (if
-\code{method = "remove"}) or downweighting them (if
-\code{method = "weight"}).
+genes from both the overlap and the background.
 \item Reports both original and corrected p-values.
 }
-}
-
-\section{Input format}{
-
-Requires at minimum a data frame with columns mappable to a pathway
-identifier, a gene list per pathway, and a p-value. Column names are
-auto-detected from common enrichment tool outputs.
 }
 
 \examples{
@@ -77,14 +81,17 @@ auto-detected from common enrichment tool outputs.
 audited <- audit_enrichment(
   enrichment_result = as.data.frame(ego),
   gene_list         = my_genes,
+  gene_sets         = my_gene_sets,
   universe          = all_genes,
-  sample_type       = "plasma"
+  sample_type       = "csf",
+  context_tissue    = "Cerebellum"
 )
-# Which pathways collapse?
-audited[audited$status_change == "lost", c("Description", "pct_suppressed")]
+audited[audited$concordance_verdict == "tissue_unsupported",
+        c("Description", "pct_detected_in_context_tissue")]
 }
 
 }
 \seealso{
-\code{\link{plot_audit}}, \code{\link{flag_genes}}
+\code{\link{plot_audit}}, \code{\link{flag_genes}},
+\code{\link{triage}}
 }

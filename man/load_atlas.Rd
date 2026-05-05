@@ -8,10 +8,10 @@ load_atlas(component = c("gene", "tissue", "both"), reload = FALSE)
 }
 \arguments{
 \item{component}{Character. \code{"gene"} (default) loads the gene-level
-summary atlas. \code{"tissue"} loads the tissue-resolved concordance
-matrix. \code{"both"} loads both.}
+summary atlas. \code{"tissue"} loads the tissue-resolved atlas.
+\code{"both"} loads both.}
 
-\item{reload}{Logical. Force reload even if cached. Default \code{FALSE}.}
+\item{reload}{Logical. Force reload from package data. Default \code{FALSE}.}
 }
 \value{
 For \code{"gene"}: a data frame (one row per gene). For
@@ -19,47 +19,42 @@ For \code{"gene"}: a data frame (one row per gene). For
 \code{"both"}: a named list with elements \code{gene} and \code{tissue}.
 }
 \description{
-Loads the precomputed gene-level atlas into a session cache. Subsequent
-calls within the same R session return the cached object without
-reloading. All other concordR functions call this internally when
-needed, so explicit use is optional.
+Loads the precomputed atlas into a session cache. Subsequent calls
+within the same R session return the cached object without reloading.
+All other concordR functions call this internally when needed, so
+explicit use is optional. Both atlases ship as internal package data
+(\code{R/sysdata.rda}) and require no network access.
 }
-\section{Atlas contents}{
+\section{Atlas contents (gene-level)}{
 
-The atlas is a data frame with one row per gene (up to 11,154 genes)
-and the following columns:
+One row per gene (up to 11,154 genes) with columns including
+\code{gene_symbol}, \code{gene_class}, \code{protein_confidence},
+\code{detection_rate}, \code{mean_rna_rank}, \code{n_tissues},
+\code{mechanistic_tier}, \code{tau}, \code{specificity_class}, and
+the \code{is_*} subcellular localisation flags. See package
+documentation for full column descriptions.
+}
+
+\section{Atlas contents (tissue-resolved)}{
+
+One row per (gene, tissue) pair with collapsed cell-type statistics:
 \describe{
 \item{\code{gene_symbol}}{HGNC symbol.}
-\item{\code{gene_class}}{Character: \code{"consistently_concordant"},
-\code{"variable"}, \code{"consistently_suppressed"},
-\code{"low_expression"}.}
-\item{\code{protein_confidence}}{Numeric \link{0, 1}. Equal to
-\code{1 - suppression_rate}. The core metric.}
-\item{\code{detection_rate}}{Numeric \link{0, 1}. Fraction of observations
-where protein was detected across all tissues.}
-\item{\code{mean_rna_rank}}{Numeric \link{0, 1}. Mean RNA expression
-percentile across all tissues.}
-\item{\code{n_tissues}}{Integer. Number of tissues with data for
-this gene in the atlas.}
-\item{\code{mechanistic_tier}}{Character: \code{"mRNA_decay"},
-\code{"translational_block"}, \code{"post_translational"},
-\code{"unexplained"}, \code{NA} (for non-suppressed genes).}
-\item{\code{is_secreted}}{Binary (0/1). HPA: secreted protein.}
-\item{\code{is_membrane}}{Binary (0/1). HPA: plasma membrane.}
-\item{\code{is_nuclear}}{Binary (0/1). HPA: nuclear localisation.}
-\item{\code{is_cytoplasmic}}{Binary (0/1). HPA: cytoplasmic.}
-\item{\code{is_mitochondrial}}{Binary (0/1). HPA: mitochondrial.}
-\item{\code{is_er_golgi}}{Binary (0/1). HPA: ER/Golgi.}
-\item{\code{is_cytoskeleton}}{Binary (0/1). HPA: cytoskeletal.}
-\item{\code{is_multilocal}}{Binary (0/1). Multiple localisations.}
+\item{\code{ts_tissue}}{Tissue label. Brain is resolved into four
+regions (Caudate, Cerebellum, Cerebral cortex, Hippocampus); the
+package does not aggregate them.}
+\item{\code{rna_rank_max}}{Max RNA rank across cell types in the
+tissue.}
+\item{\code{rna_mean_tissue}}{Mean RNA expression across cell types.}
+\item{\code{detect_fraction}}{Fraction of cell types in the tissue
+where protein was detected.}
+\item{\code{protein_max}}{Max protein score across cell types.}
+\item{\code{n_cell_types}}{Number of cell types in the tissue.}
+\item{\code{is_brain}}{Convenience flag, 1 for the four brain regions.}
+\item{\code{tissue_class}}{Per-tissue concordance class:
+\code{"low_expression"}, \code{"suppressed_in_tissue"},
+\code{"variable_in_tissue"}, \code{"concordant_in_tissue"}.}
 }
-}
-
-\section{Tissue-resolved profiles}{
-
-An optional extended atlas with per-gene, per-tissue concordance data
-is available via \code{component = "tissue"}. This is a larger object
-(~50 MB) downloaded from Zenodo on first use.
 }
 
 \examples{
@@ -67,8 +62,9 @@ is available via \code{component = "tissue"}. This is a larger object
 atlas <- load_atlas()
 head(atlas)
 
-# Tissue-resolved profiles
-tissue_atlas <- load_atlas("tissue")
+# Tissue-resolved atlas
+tissue <- load_atlas("tissue")
+head(tissue[tissue$gene_symbol == "NEFL", ])
 }
 
 }
