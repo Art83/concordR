@@ -100,10 +100,8 @@
 #' @keywords internal
 #' @noRd
 .check_plausibility <- function(atlas_subset, sample_type) {
-  sample_type <- tolower(sample_type)
   if (!sample_type %in% .SAMPLE_TYPES)
-    stop("Unknown sample_type '", sample_type, "'. Available: ",
-         paste(.SAMPLE_TYPES, collapse = ", "), ".")
+    stop("Unknown sample type: ", sample_type)
   
   plausible_cols <- .PLAUSIBLE_FLAGS[[sample_type]]
   if (is.null(plausible_cols)) return(rep(TRUE, nrow(atlas_subset)))
@@ -111,11 +109,24 @@
   available <- intersect(plausible_cols, names(atlas_subset))
   if (length(available) == 0L) return(rep(NA, nrow(atlas_subset)))
   
-  apply(atlas_subset[, available, drop = FALSE], 1, function(row) {
-    if (all(is.na(row))) return(NA)
-    if (all(row == 0, na.rm = TRUE)) return(FALSE)
-    any(row == 1, na.rm = TRUE)
-  })
+  # Distinguish "has localisation data, none in this compartment" (legitimate
+  # compartment_implausible) from "no localisation data recorded" (NA- gate
+  # cannot evaluate). Without this distinction, a gene with all zero/NA
+  # localisation flags fails compartment in every sample_type, treating
+  # absence of evidence as evidence of absence.
+  all_loc_cols <- grep("^is_", names(atlas_subset), value = TRUE)
+  
+  loc_data    <- as.matrix(atlas_subset[, all_loc_cols, drop = FALSE])
+  plaus_data  <- as.matrix(atlas_subset[, available,    drop = FALSE])
+  storage.mode(loc_data)   <- "numeric"
+  storage.mode(plaus_data) <- "numeric"
+  
+  has_any_positive <- rowSums(loc_data   == 1, na.rm = TRUE) > 0
+  has_plausible    <- rowSums(plaus_data == 1, na.rm = TRUE) > 0
+  
+  ifelse(!has_any_positive, NA,
+         ifelse(has_plausible,     TRUE,
+                FALSE))
 }
 
 
