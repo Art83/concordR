@@ -92,6 +92,18 @@ load_atlas <- function(component = c("gene", "tissue", "both"),
       }
     }
   }
+  
+  if (component %in% c("brain", "both")) {
+    if (isTRUE(reload) || is.null(.atlas_env$brain)) {
+      if (exists("brain_summary", envir = asNamespace("concordR"),
+                 inherits = FALSE)) {
+        .atlas_env$brain <- get("brain_summary",
+                                envir = asNamespace("concordR"))
+      } else {
+        .atlas_env$brain <- NULL  # optional dataset, don't error
+      }
+    }
+  }
 
   switch(component,
     gene   = .atlas_env$gene,
@@ -121,4 +133,12 @@ load_atlas <- function(component = c("gene", "tissue", "both"),
   if (inherits(.atlas_env$tissue, "data.table"))
     .atlas_env$tissue <- as.data.frame(.atlas_env$tissue)
   .atlas_env$tissue
+}
+
+#' Internal helper for brain summary
+#' @keywords internal
+#' @noRd
+.ensure_brain_summary <- function() {
+  if (is.null(.atlas_env$brain)) load_atlas("brain")
+  .atlas_env$brain
 }

@@ -112,11 +112,22 @@ flag_genes <- function(genes, sample_type) {
   # --- Caveats ---
   q$caveat <- .build_caveat(q, proj, damage_context)
   
+  # --- Cross-platform confidence ---
+  q$cross_platform_flag <- NA
+  q$low_evidence_flag   <- NA
+  if (length(found_idx) > 0L) {
+    cpa <- q$cross_platform_agree_rate[found_idx]
+    mpe <- q$mean_protein_evidence[found_idx]
+    q$cross_platform_flag[found_idx] <- !is.na(cpa) & cpa < 0.5
+    q$low_evidence_flag[found_idx]   <- !is.na(mpe) & mpe < 1
+  }
+  
   # --- Select + order output columns ---
   candidate_cols <- c("gene_symbol", "gene_class", "protein_confidence",
                       "detection_rate", "mechanism_tier",
                       "localisation", "loc_plausible",
                       "tau", "specificity_class",
+                      "cross_platform_flag", "low_evidence_flag",
                       "flag", "caveat")
   out_cols <- intersect(candidate_cols, names(q))
   q[, out_cols, drop = FALSE]
@@ -190,6 +201,13 @@ flag_genes <- function(genes, sample_type) {
         q$specificity_class[i] == "broadly_expressed") {
       msgs <- c(msgs,
                 "Broadly expressed (tau low); tissue-of-origin claims unsupported.")
+    }
+    # HPA vs GTEx disagree on concordance
+    if ("cross_platform_agree_rate" %in% names(q) &&
+        !is.na(q$cross_platform_agree_rate[i]) &&
+        q$cross_platform_agree_rate[i] < 0.5) {
+      msgs <- c(msgs,
+                "HPA and GTEx disagree on concordance for this gene; classification confidence is low.")
     }
     
     if (length(msgs) > 0L) caveats[i] <- paste(msgs, collapse = " ")

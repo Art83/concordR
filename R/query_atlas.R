@@ -1,5 +1,5 @@
 # =============================================================================
-# query_atlas — gene-level lookup
+# query_atlas for gene-level lookup
 # =============================================================================
 
 #' Look up genes in the RNA--protein concordance atlas
@@ -110,4 +110,20 @@ query_atlas <- function(genes,
     pct_suppressed = if (n > 0) classes["consistently_suppressed"] / n * 100
                      else NA_real_
   )
+}
+
+
+#' Look up genes in the tissue-resolved atlas
+#'
+#' @param genes Character vector of HGNC gene symbols.
+#' @param tissues Character vector of tissue names, or NULL for all.
+#' @return Data frame filtered to matching gene-tissue pairs.
+#' @export
+query_tissue <- function(genes, tissues = NULL) {
+  ta <- .ensure_tissue_atlas()
+  idx <- toupper(ta$gene_symbol) %in% toupper(genes)
+  if (!is.null(tissues)) {
+    idx <- idx & ta$ts_tissue %in% tissues
+  }
+  ta[idx, , drop = FALSE]
 }

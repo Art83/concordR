@@ -25,6 +25,26 @@
   membrane_fraction      = c("is_membrane", "is_er_golgi")
 )
 
+#' Substrate-to-tissue mapping
+#'
+#' For biofluids with a clear anatomical source, maps to the tissues
+#' that the package checks automatically. NULL means systemic — no
+#' tissue is implied and gene-level evidence is used.
+#' @keywords internal
+#' @noRd
+.SAMPLE_TISSUE_MAP <- list(
+  plasma                 = NULL,
+  serum                  = NULL,
+  csf                    = c("Caudate", "Cerebellum", "Cerebral cortex", "Hippocampus"),
+  urine                  = "Kidney",
+  cell_lysate            = NULL,
+  tissue                 = NULL,
+  nuclear_fraction       = NULL,
+  mitochondrial_fraction = NULL,
+  membrane_fraction      = NULL
+)
+
+
 #' Sample types where projection proteins (axonal/dendritic) can be
 #' released by damage and detected via regulated-release or biomarker
 #' pathways (NEFL-in-plasma pattern). Used to avoid over-flagging

@@ -178,7 +178,9 @@ audit_enrichment <- function(enrichment_result,
       ann_df$pct_broadly_expressed else rep(NA_real_, nrow(ann_df)),
     if ("status_change" %in% names(ann_df)) ann_df$status_change else NULL,
     if ("pct_detected_in_context_tissue" %in% names(ann_df))
-      ann_df$pct_detected_in_context_tissue else rep(NA_real_, nrow(ann_df))
+      ann_df$pct_detected_in_context_tissue else rep(NA_real_, nrow(ann_df)),
+    if ("mean_cross_platform_agree" %in% names(ann_df))
+      ann_df$mean_cross_platform_agree else NULL
   )
 
   cbind(enrichment_result, ann_df)
@@ -228,6 +230,8 @@ audit_enrichment <- function(enrichment_result,
       n_variable = 0L,
       pct_concordant = NA_real_, pct_suppressed = NA_real_,
       pct_broadly_expressed = NA_real_,
+      mean_protein_evidence = NA_real_,
+      mean_cross_platform_agree = NA_real_,
       stringsAsFactors = FALSE)
     if (!is.null(sample_type))    out$pct_loc_plausible              <- NA_real_
     if (!is.null(resolved_tissue)) out$pct_detected_in_context_tissue <- NA_real_
@@ -261,7 +265,7 @@ audit_enrichment <- function(enrichment_result,
   } else {
     pct_broad <- NA_real_
   }
-
+  
   out <- data.frame(
     n_overlap             = n,
     n_concordant          = n_conc,
@@ -271,6 +275,14 @@ audit_enrichment <- function(enrichment_result,
     pct_suppressed        = n_supp / n_found * 100,
     pct_broadly_expressed = pct_broad,
     stringsAsFactors = FALSE)
+  
+  # Multi-platform protein evidence
+  if ("mean_protein_evidence" %in% names(matched)) {
+    out$mean_protein_evidence <- mean(matched$mean_protein_evidence, na.rm = TRUE)
+  }
+  if ("cross_platform_agree_rate" %in% names(matched)) {
+    out$mean_cross_platform_agree <- mean(matched$cross_platform_agree_rate, na.rm = TRUE)
+  }
 
   if (!is.null(sample_type)) {
     plausible <- .check_plausibility(matched, sample_type)
@@ -306,12 +318,16 @@ audit_enrichment <- function(enrichment_result,
   idx <- match(toupper(overlap_genes), toupper(ta_sub$gene_symbol))
   matched <- !is.na(idx)
   if (!any(matched)) return(NA_real_)
-
+  
   cls <- ta_sub$tissue_class[idx[matched]]
   det <- ta_sub$detect_fraction[idx[matched]]
-
+  ms  <- if ("ms_detected" %in% names(ta_sub))
+    ta_sub$ms_detected[idx[matched]] else rep(FALSE, sum(matched))
+  
+  # Detected by IHC OR by MS
   detected <- (cls == "concordant_in_tissue") |
-              (cls == "variable_in_tissue" & !is.na(det) & det > 0)
+    (cls == "variable_in_tissue" & !is.na(det) & det > 0) |
+    (!is.na(ms) & ms)
   sum(detected, na.rm = TRUE) / sum(matched) * 100
 }
 
@@ -355,7 +371,8 @@ audit_enrichment <- function(enrichment_result,
 #' @noRd
 .verdict <- function(pct_concordant, pct_suppressed,
                      pct_broadly_expressed, status_change = NULL,
-                     pct_detected_in_context_tissue = NULL) {
+                     pct_detected_in_context_tissue = NULL,
+                     mean_cross_platform_agree = NULL) {
   n <- length(pct_concordant)
   out <- character(n)
   for (i in seq_len(n)) {
@@ -364,28 +381,40 @@ audit_enrichment <- function(enrichment_result,
     pb <- pct_broadly_expressed[i]
     sc <- if (is.null(status_change)) NA_character_ else status_change[i]
     pt <- if (is.null(pct_detected_in_context_tissue)) NA_real_
-          else pct_detected_in_context_tissue[i]
-
+    else pct_detected_in_context_tissue[i]
+    mcpa <- if (is.null(mean_cross_platform_agree)) NA_real_
+    else mean_cross_platform_agree[i]
+    
     if (is.na(pc)) { out[i] <- NA_character_; next }
-
+    
     # --- Tissue context overrides (only when supplied) ---
     if (!is.na(pt) && pt < 50) {
       out[i] <- "tissue_unsupported"; next
     }
-
+    
+    # --- High suppression fraction ---
     if (pc < 30 || (!is.na(ps) && ps > 50)) {
+      # Cross-platform disagreement weakens the suppression calls
+      if (!is.na(mcpa) && mcpa < 0.3) {
+        out[i] <- "questionable"; next
+      }
       out[i] <- "unreliable"; next
     }
-
-    # Concordance looks OK — but is the enrichment tissue-informative?
+    
+    # --- Concordance OK but broadly expressed ---
     if (!is.na(pb) && pb > 80) {
       out[i] <- "concordant_but_broad"; next
     }
-
+    
+    # --- Strong concordance, robust correction ---
     if (pc >= 60 && (is.na(sc) || sc %in% c("robust", "ns"))) {
+      # High cross-platform agreement strengthens the call
+      if (!is.na(mcpa) && mcpa > 0.7) {
+        out[i] <- "trustworthy"; next
+      }
       out[i] <- "trustworthy"; next
     }
-
+    
     out[i] <- "questionable"
   }
   out
