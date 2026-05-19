@@ -22,6 +22,8 @@
 
 library(data.table)
 library(arrow)
+library(dplyr)
+library(tidyr)
 
 # ---- Paths -----------------------------------------------------------------
 PROJECT_ROOT  <- "D:/Bioinformatics_projects/hpa_to_tabula"
@@ -85,18 +87,18 @@ cat("Localisation columns found:", paste(loc_cols, collapse = ", "), "\n")
 
 # First non-NA value per gene for each localisation flag
 gene_feat <- df[,
-  lapply(.SD, function(x) {
-    v <- x[!is.na(x)]
-    if (length(v) == 0) NA_integer_ else as.integer(v[1])
-  }),
-  by    = gene_symbol,
-  .SDcols = loc_cols
+                lapply(.SD, function(x) {
+                  v <- x[!is.na(x)]
+                  if (length(v) == 0) NA_integer_ else as.integer(v[1])
+                }),
+                by    = gene_symbol,
+                .SDcols = loc_cols
 ]
 
 # ---- 4. Tissue count per gene (from observations) --------------------------
 n_tissues <- df[,
-  list(n_tissues = uniqueN(ts_tissue)),
-  by = gene_symbol
+                list(n_tissues = uniqueN(ts_tissue)),
+                by = gene_symbol
 ]
 
 # ---- 5. Tissue specificity (Yanai tau) on rna_rank -------------------------
@@ -104,27 +106,27 @@ n_tissues <- df[,
 # Using rna_rank (not rna_mean) because rna_rank was computed per-source in
 # script 02/04 and is therefore comparable across Tabula and Brain atlases.
 gene_tissue <- df[,
-  list(rna_tissue = mean(rna_rank, na.rm = TRUE)),
-  by = list(gene_symbol, ts_tissue)
+                  list(rna_tissue = mean(rna_rank, na.rm = TRUE)),
+                  by = list(gene_symbol, ts_tissue)
 ]
 
 tau_dt <- gene_tissue[,
-  {
-    n <- .N
-    if (n < 10) {
-      list(tau = NA_real_, n_tissues_for_tau = n)
-    } else {
-      mx <- max(rna_tissue, na.rm = TRUE)
-      if (!is.finite(mx) || mx == 0) {
-        list(tau = NA_real_, n_tissues_for_tau = n)
-      } else {
-        x <- rna_tissue / mx
-        list(tau               = sum(1 - x, na.rm = TRUE) / (n - 1),
-             n_tissues_for_tau = n)
-      }
-    }
-  },
-  by = gene_symbol
+                      {
+                        n <- .N
+                        if (n < 10) {
+                          list(tau = NA_real_, n_tissues_for_tau = n)
+                        } else {
+                          mx <- max(rna_tissue, na.rm = TRUE)
+                          if (!is.finite(mx) || mx == 0) {
+                            list(tau = NA_real_, n_tissues_for_tau = n)
+                          } else {
+                            x <- rna_tissue / mx
+                            list(tau               = sum(1 - x, na.rm = TRUE) / (n - 1),
+                                 n_tissues_for_tau = n)
+                          }
+                        }
+                      },
+                      by = gene_symbol
 ]
 
 tau_dt[, specificity_class := fcase(
@@ -154,7 +156,7 @@ if (file.exists(TIER_CSV)) {
   cat("No mechanism tier CSV found; skipping.\n")
 }
 
-# ---- 6b. Gene × tissue collapsed (cell-types collapsed within tissue) ----
+# ---- 6b. Gene x tissue collapsed (cell-types collapsed within tissue) ------
 # For each (gene, tissue): take the maximum RNA rank across cell types
 # (the question is "is this gene present in this tissue at all?"), the
 # fraction of cell types in the tissue where protein is detected, and
@@ -166,7 +168,7 @@ tissue_atlas <- df[, list(
   protein_max          = max(protein_score, na.rm = TRUE),
   n_cell_types         = uniqueN(ts_cell_type),
   is_brain             = max(is_brain,     na.rm = TRUE)
-), by = list(gene_symbol,ensembl_id, ts_tissue)]
+), by = list(gene_symbol, ensembl_id, ts_tissue)]
 
 # Per-(gene, tissue) class label.
 # Thresholds mirror the global atlas call but use the collapsed
@@ -189,7 +191,6 @@ cat("  unique tissues: ", uniqueN(tissue_atlas$ts_tissue),   "\n", sep = "")
 cat("  size (MB):      ",
     format(object.size(tissue_atlas), units = "Mb"), "\n", sep = "")
 print(table(tissue_atlas$tissue_class, useNA = "ifany"))
-
 
 
 # ---- 7. Merge everything on gene_symbol ------------------------------------
@@ -243,15 +244,23 @@ if ("mechanism_tier" %in% names(concordance_atlas)) {
 }
 
 
+# ===========================================================================
+# External platform data: PaxDB, GTEx protein, GTEx RNA
+# ===========================================================================
+# NOTE: tissue_atlas is already in memory from section 6b above.
+#       Previous versions had a `load("R/sysdata.rda")` here which
+#       silently overwrote the freshly-built tissue_atlas. Removed.
 
-# --- PaxDB ---
-map <- read.csv("../../Bioinformatics_projects/hpa_to_tabula/external_data/ensembl_entrez_symbol_map.tsv",
-                sep = "\t")
-map <- map[, -2]
-colnames(map) <- c("ensembl_id", "symbol")
-map <- map[!duplicated(map$ensembl_id), ]
-map <- map[!duplicated(map$symbol), ]
-map <- map[map$symbol != "", ]
+
+# --- PaxDB (merged via ENSP -> ENSG, not symbol) ---------------------------
+#
+# PaxDb indexes proteins by Ensembl protein ID (ENSP). Previous versions
+# merged by gene symbol via an intermediate map, which silently dropped
+# genes where PaxDb's symbol annotation diverged from HGNC (e.g. LILRA4:
+# ENSP00000291759 in PaxDb, ENSG00000239961 in the atlas).
+#
+# Fix: read the ENSP from PaxDb, map to ENSG via biomaRt, merge on
+# ensembl_id. The ENSP is retained as paxdb_ensp for traceability.
 
 PAXDB_TISSUE_MAP <- list(
   "cerebral-cortex" = "Cerebral cortex",
@@ -267,24 +276,62 @@ PAXDB_TISSUE_MAP <- list(
   "testis"          = "Testis"
 )
 
-paxdb <- lapply(names(PAXDB_TISSUE_MAP), function(name) {
-  df <- read.csv(file.path("../../Bioinformatics_projects/hpa_to_tabula/external_data/paxdb",
-                           paste0(name, ".txt")), skip = 11, sep = "\t")
-  df <- df[, -2]
-  colnames(df)[1] <- "symbol"
-  df$tissue <- PAXDB_TISSUE_MAP[[name]]
+PAXDB_DIR <- file.path(PROJECT_ROOT, "external_data/paxdb")
+
+paxdb_raw <- lapply(names(PAXDB_TISSUE_MAP), function(name) {
+  df <- read.csv(file.path(PAXDB_DIR, paste0(name, ".txt")),
+                 skip = 11, sep = "\t", header = FALSE,
+                 stringsAsFactors = FALSE, comment.char = "")
+  # PaxDb TSV: col1 = internal_id, col2 = string_external_id, col3 = abundance
+  # string_external_id format: "9606.ENSP00000XXXXXX"
+  colnames(df) <- c("paxdb_internal_id", "paxdb_string_id", "abundance")
+  df$ts_tissue <- PAXDB_TISSUE_MAP[[name]]
   df
 })
-paxdb <- do.call(rbind, paxdb)
-paxdb <- paxdb %>% 
-  inner_join(map, by="symbol") %>%
-  rename(ts_tissue = tissue) %>% 
-  select(ensembl_id, ts_tissue, abundance)
+paxdb_raw <- do.call(rbind, paxdb_raw)
+
+# Extract bare ENSP from "9606.ENSP..." format
+paxdb_raw$ensp <- sub("^9606\\.", "", paxdb_raw$paxdb_string_id)
+
+cat(sprintf("PaxDb raw: %d rows, %d unique ENSP\n",
+            nrow(paxdb_raw), length(unique(paxdb_raw$ensp))))
+
+# --- ENSP -> ENSG mapping via biomaRt (cached to avoid repeated queries) ---
+ENSP_MAP_CACHE <- file.path(PROJECT_ROOT, "external_data/ensp_to_ensg_biomart.txt")
+
+if (file.exists(ENSP_MAP_CACHE)) {
+  cat("Loading cached ENSP -> ENSG map from:", ENSP_MAP_CACHE, "\n")
+  ensp_map <- read.csv(ENSP_MAP_CACHE,sep="\t", stringsAsFactors = FALSE)
+}
+
+colnames(ensp_map) <- c("ensembl_id", "ensp", "hgnc_symbol")
+
+# Deduplicate: keep one ENSG per ENSP (multiple isoforms -> same gene)
+ensp_map <- ensp_map[!duplicated(ensp_map$ensp), ]
+
+cat(sprintf("ENSP map: %d ENSP -> %d unique ENSG\n",
+            nrow(ensp_map), length(unique(ensp_map$ensembl_id))))
+
+# Join PaxDb to ENSG, then collapse isoforms: max abundance per (gene, tissue)
+paxdb <- paxdb_raw %>%
+  inner_join(ensp_map[, c("ensp", "ensembl_id")], by = "ensp") %>%
+  group_by(ensembl_id, ts_tissue) %>%
+  summarise(
+    abundance  = max(abundance, na.rm = TRUE),
+    paxdb_ensp = paste(unique(ensp), collapse = ";"),  # traceability
+    .groups    = "drop"
+  )
+
+# Diagnostic: how many atlas genes now have PaxDb coverage?
+n_atlas_with_paxdb <- sum(unique(tissue_atlas$ensembl_id) %in% paxdb$ensembl_id)
+cat(sprintf("PaxDb after ENSP mapping: %d (gene, tissue) rows, %d atlas genes covered\n",
+            nrow(paxdb), n_atlas_with_paxdb))
 
 
 # --- GTEx shared columns ---
-cols <- c("Brain.Cortex", "Breast", "Heart.Atrial", "Heart.Ventricle", "Liver", "Lung", "Minor.Salivary",
-          "Muscle.Skeletal", "Pancreas", "Prostate", "Skin.Unexpo", "Small.Intestine", "Spleen", "Stomach",
+cols <- c("Brain.Cortex", "Breast", "Heart.Atrial", "Heart.Ventricle",
+          "Liver", "Lung", "Minor.Salivary", "Muscle.Skeletal", "Pancreas",
+          "Prostate", "Skin.Unexpo", "Small.Intestine", "Spleen", "Stomach",
           "Testis", "Uterus")
 
 rename_vec <- c(
@@ -296,27 +343,28 @@ rename_vec <- c(
   "Small.Intestine"  = "Small Intestine"
 )
 
+EXTERNAL_DIR <- file.path(PROJECT_ROOT, "external_data")
+
 # =========================================================
 # GTEx Medians (already numeric, no flags)
 # =========================================================
-gtex_medians <- read.csv("../../Bioinformatics_projects/hpa_to_tabula/external_data/gtex_protein_tissue_median.csv")
+gtex_medians <- read.csv(file.path(EXTERNAL_DIR, "gtex_protein_tissue_median.csv"))
 
-gtex_medians <- gtex_medians %>% 
-  select(all_of(c("gene.id", cols))) %>% 
+gtex_medians <- gtex_medians %>%
+  dplyr::select(all_of(c("gene.id", cols))) %>%
   rowwise() %>%
   mutate(Heart = median(c(Heart.Atrial, Heart.Ventricle), na.rm = TRUE)) %>%
   ungroup() %>%
-  select(-Heart.Ventricle, -Heart.Atrial) %>% 
-  rename(ensembl_id = gene.id) %>% 
-  tidyr::pivot_longer(-ensembl_id, names_to = "ts_tissue", values_to = "abundance_gtex") %>% 
+  dplyr::select(-Heart.Ventricle, -Heart.Atrial) %>%
+  rename(ensembl_id = gene.id) %>%
+  tidyr::pivot_longer(-ensembl_id, names_to = "ts_tissue", values_to = "abundance_gtex") %>%
   mutate(ts_tissue = recode(ts_tissue, !!!rename_vec))
 
 
 # =========================================================
 # GTEx Protein TS scores
 # =========================================================
-gtex_ts_raw <- read.csv("../../Bioinformatics_projects/hpa_to_tabula/external_data/gtex_protein_ts_score.csv")
-
+gtex_ts_raw <- read.csv(file.path(EXTERNAL_DIR, "gtex_protein_ts_score.csv"))
 
 gtex_ts <- gtex_ts_raw[, c("ensembl_id", cols)] %>%
   tidyr::pivot_longer(-ensembl_id, names_to = "ts_tissue", values_to = "raw") %>%
@@ -325,9 +373,9 @@ gtex_ts <- gtex_ts_raw[, c("ensembl_id", cols)] %>%
     flag = sapply(strsplit(raw, ";", fixed = TRUE), `[`, 2)
   ) %>%
   filter(is.na(flag) | flag != "NA_one_rep_in_raw") %>%
-  select(-raw, -flag) %>%
+  dplyr::select(-raw, -flag) %>%
   mutate(ts_tissue = recode(ts_tissue, !!!rename_vec,
-                         "Heart.Atrial" = "Heart", "Heart.Ventricle" = "Heart")) %>%
+                            "Heart.Atrial" = "Heart", "Heart.Ventricle" = "Heart")) %>%
   group_by(ensembl_id, ts_tissue) %>%
   summarise(ts_protein_gtex = median(ts_protein_gtex, na.rm = TRUE), .groups = "drop")
 
@@ -335,7 +383,7 @@ gtex_ts <- gtex_ts_raw[, c("ensembl_id", cols)] %>%
 # =========================================================
 # GTEx RNA TS scores
 # =========================================================
-gtex_rna_raw <- read.csv("../../Bioinformatics_projects/hpa_to_tabula/external_data/gtex_rna_ts_score.csv")
+gtex_rna_raw <- read.csv(file.path(EXTERNAL_DIR, "gtex_rna_ts_score.csv"))
 
 gtex_rna_ts <- gtex_rna_raw[, c("ensembl_id", cols)] %>%
   tidyr::pivot_longer(-ensembl_id, names_to = "ts_tissue", values_to = "raw") %>%
@@ -345,23 +393,25 @@ gtex_rna_ts <- gtex_rna_raw[, c("ensembl_id", cols)] %>%
   ) %>%
   filter(is.na(flag) | flag != "NA_raw_tpm_less_1") %>%
   filter(is.na(flag) | flag != "all_tissues_tpm_less_1") %>%
-  select(-raw, -flag) %>%
+  dplyr::select(-raw, -flag) %>%
   mutate(ts_tissue = recode(ts_tissue, !!!rename_vec,
-                         "Heart.Atrial" = "Heart", "Heart.Ventricle" = "Heart")) %>%
+                            "Heart.Atrial" = "Heart", "Heart.Ventricle" = "Heart")) %>%
   group_by(ensembl_id, ts_tissue) %>%
   summarise(ts_rna_gtex = median(ts_rna_gtex, na.rm = TRUE), .groups = "drop")
 
 
-
-
-
-load("R/sysdata.rda")
+# ===========================================================================
+# Augment tissue_atlas with external platforms
+# ===========================================================================
+# NOTE: tissue_atlas was built in section 6b above.
+#       No load("R/sysdata.rda") — that was a bug in previous versions
+#       which silently overwrote the freshly-built tissue_atlas.
 
 tissue_atlas <- tissue_atlas %>%
   left_join(gtex_medians, by = c("ensembl_id", "ts_tissue")) %>%
   left_join(gtex_ts,      by = c("ensembl_id", "ts_tissue")) %>%
   left_join(gtex_rna_ts,  by = c("ensembl_id", "ts_tissue")) %>%
-  left_join(paxdb,   by = c("ensembl_id", "ts_tissue")) %>%
+  left_join(paxdb,         by = c("ensembl_id", "ts_tissue")) %>%
   mutate(
     ms_detected    = !is.na(ts_protein_gtex),
     paxdb_detected = !is.na(abundance),
@@ -373,7 +423,7 @@ tissue_atlas <- tissue_atlas %>%
       !ihc_detected & ms_detected ~ "ms_only",
       TRUE                        ~ "both_absent"
     )
-  ) %>% 
+  ) %>%
   mutate(
     # GTEx internal concordance
     gtex_concordance = case_when(
@@ -387,11 +437,11 @@ tissue_atlas <- tissue_atlas %>%
     platforms_agree = case_when(
       is.na(gtex_concordance) ~ NA,
       tissue_class == "suppressed_in_tissue" &
-        gtex_concordance == "gtex_suppressed"      ~ TRUE,
+        gtex_concordance == "gtex_suppressed"       ~ TRUE,
       tissue_class == "concordant_in_tissue" &
-        gtex_concordance == "gtex_concordant"       ~ TRUE,
+        gtex_concordance == "gtex_concordant"        ~ TRUE,
       tissue_class %in% c("suppressed_in_tissue", "concordant_in_tissue") ~ FALSE,
-      TRUE                                          ~ NA  # variable/low_expression: can't compare
+      TRUE                                           ~ NA  # variable/low: can't compare
     ),
     # Protein detection consensus (all three platforms)
     protein_detection_consensus = case_when(
@@ -402,12 +452,15 @@ tissue_atlas <- tissue_atlas %>%
   )
 
 
+# ===========================================================================
+# Gene-level summaries from external platforms
+# ===========================================================================
 gtex_gene_summary <- tissue_atlas %>%
   group_by(gene_symbol) %>%
   summarise(
     gtex_n_tissues_detected    = sum(ms_detected, na.rm = TRUE),
     paxdb_n_tissues_detected   = sum(paxdb_detected, na.rm = TRUE),
-    max_protein_evidence      = max(protein_evidence_sources, na.rm = TRUE),
+    max_protein_evidence       = max(protein_evidence_sources, na.rm = TRUE),
     cross_platform_agree_rate  = mean(platforms_agree, na.rm = TRUE),
     gtex_suppression_rate      = mean(gtex_concordance == "gtex_suppressed", na.rm = TRUE),
     .groups = "drop"
@@ -417,6 +470,9 @@ concordance_atlas <- concordance_atlas %>%
   left_join(gtex_gene_summary, by = "gene_symbol")
 
 
+# ===========================================================================
+# Brain-specific summary
+# ===========================================================================
 brain_summary <- tissue_atlas %>%
   filter(is_brain == 1, rna_rank_max > 0.70) %>%
   group_by(gene_symbol, ensembl_id) %>%
@@ -435,13 +491,27 @@ brain_summary <- tissue_atlas %>%
   ))
 
 
-
+# ===========================================================================
+# Save sysdata
+# ===========================================================================
 concordance_atlas <- as.data.frame(concordance_atlas)
 tissue_atlas      <- as.data.frame(tissue_atlas)
 brain_summary     <- as.data.frame(brain_summary)
 
+cat("\n==== Final dimensions ====\n")
+cat("  concordance_atlas:", nrow(concordance_atlas), "genes x",
+    ncol(concordance_atlas), "cols\n")
+cat("  tissue_atlas:     ", nrow(tissue_atlas), "(gene, tissue) rows x",
+    ncol(tissue_atlas), "cols\n")
+cat("  brain_summary:    ", nrow(brain_summary), "genes x",
+    ncol(brain_summary), "cols\n")
+
+# Sanity: confirm PaxDb coverage improved
+cat("\n==== PaxDb coverage check ====\n")
+cat("  tissue_atlas rows with paxdb_detected = TRUE:",
+    sum(tissue_atlas$paxdb_detected, na.rm = TRUE), "\n")
+cat("  concordance_atlas genes with paxdb_n_tissues > 0:",
+    sum(concordance_atlas$paxdb_n_tissues_detected > 0, na.rm = TRUE), "\n")
+
 usethis::use_data(concordance_atlas, tissue_atlas, brain_summary,
                   internal = TRUE, overwrite = TRUE)
-
-
-
