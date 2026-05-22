@@ -55,7 +55,7 @@
 #'
 #' @param genes Character vector of HGNC gene symbols.
 #' @param sample_type Character. The biological compartment where proteins
-#'   were measured. See \code{\link{flag_genes}} for the full list.
+#'   were measured.
 #' @param context_tissue Character or \code{NULL}. Overrides automatic
 #'   tissue inference. When supplied, narrows the tissue gate to this
 #'   specific tissue. Brain is resolved as four regions, pass one
@@ -76,7 +76,7 @@
 #' triage(c("AR", "ESR1", "CD274", "TP53"), sample_type = "plasma")
 #' }
 #'
-#' @seealso \code{\link{flag_genes}}, \code{\link{audit_enrichment}}
+#' @seealso \code{\link{query_atlas}}
 #' @export
 triage <- function(genes, sample_type, context_tissue = NULL) {
   
@@ -105,21 +105,21 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
   }
   
   # --- Resolve effective tissues ---
-  # context_tissue overrides; otherwise infer from sample_type
   implied_tissues <- .SAMPLE_TISSUE_MAP[[sample_type]]
   is_biofluid     <- sample_type %in% c("plasma", "serum", "csf")
   is_systemic     <- is.null(implied_tissues) && is.null(context_tissue)
   
+  # Always load tissue atlas: needed for protein breadth and primary
+  # tissue even when no tissue gate fires (systemic biofluids).
+  ta <- .ensure_tissue_atlas()
+  
   if (!is.null(context_tissue)) {
-    ta <- .ensure_tissue_atlas()
-    resolved_tissue  <- .validate_context_tissue(context_tissue, ta)
-    effective_tissues <- resolved_tissue
+    resolved_tissue   <- .validate_context_tissue(context_tissue, ta)
+    effective_tissues  <- resolved_tissue
   } else if (!is.null(implied_tissues)) {
-    ta <- .ensure_tissue_atlas()
-    effective_tissues <- implied_tissues
+    effective_tissues  <- implied_tissues
   } else {
-    ta <- NULL
-    effective_tissues <- NULL
+    effective_tissues  <- NULL
   }
   
   # --- Compute tissue-level evidence for effective tissues ---
@@ -215,6 +215,18 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
     !is.na(q$tau) & q$tau < 0.20
   } else {
     rep(FALSE, nrow(q))
+  }
+  
+  # Protein-level breadth override: RNA tau can miss genes with
+  # moderate RNA variation but ubiquitous protein (e.g. TREM2).
+  if (!is.null(ta) && length(found_idx) > 0L) {
+    pb <- .protein_tissue_breadth(q$gene_symbol[found_idx], ta)
+    pb_idx <- match(toupper(q$gene_symbol), toupper(pb$gene_symbol))
+    pb_matched <- !is.na(pb_idx)
+    protein_broad <- rep(FALSE, nrow(q))
+    protein_broad[pb_matched] <- !is.na(pb$protein_breadth[pb_idx[pb_matched]]) &
+      pb$protein_breadth[pb_idx[pb_matched]] >= 0.75
+    broad <- broad | protein_broad
   }
   
   # --- Apply target verdicts ---
@@ -637,4 +649,40 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
   result <- any_ihc[idx]
   result[is.na(result)] <- FALSE
   as.logical(result)
+}
+
+
+#' Compute protein-level tissue breadth for genes
+#'
+#' Fraction of atlas tissues where protein is detected by any platform
+#' (IHC detect_fraction > 0, GTEx MS, or PaxDb). Used to override
+#' RNA-based tau when protein and RNA breadth diverge.
+#'
+#' @keywords internal
+#' @noRd
+.protein_tissue_breadth <- function(gene_symbols, tissue_atlas) {
+  n_total <- length(unique(tissue_atlas$ts_tissue))
+  ta_sub <- tissue_atlas[toupper(tissue_atlas$gene_symbol) %in%
+                           toupper(gene_symbols), , drop = FALSE]
+  
+  if (nrow(ta_sub) == 0L) {
+    return(data.frame(gene_symbol = gene_symbols,
+                      protein_breadth = NA_real_,
+                      stringsAsFactors = FALSE))
+  }
+  
+  ihc <- !is.na(ta_sub$detect_fraction) & ta_sub$detect_fraction > 0
+  ms  <- if ("ms_detected" %in% names(ta_sub))
+    !is.na(ta_sub$ms_detected) & ta_sub$ms_detected else rep(FALSE, nrow(ta_sub))
+  pax <- if ("paxdb_detected" %in% names(ta_sub))
+    !is.na(ta_sub$paxdb_detected) & ta_sub$paxdb_detected else rep(FALSE, nrow(ta_sub))
+  
+  ta_sub$any_det <- ihc | ms | pax
+  key <- toupper(ta_sub$gene_symbol)
+  n_det <- tapply(ta_sub$any_det, key, sum, na.rm = TRUE)
+  
+  idx <- match(toupper(gene_symbols), names(n_det))
+  data.frame(gene_symbol = gene_symbols,
+             protein_breadth = as.numeric(n_det[idx]) / n_total,
+             stringsAsFactors = FALSE)
 }

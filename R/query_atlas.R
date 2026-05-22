@@ -59,7 +59,7 @@ query_atlas <- function(genes,
 
   # Build result from matched rows
   result <- atlas[idx[found], , drop = FALSE]
-  result$found <- TRUE
+  result$found <- rep(TRUE, nrow(result))
 
   if (any(!found) && missing != "drop") {
     missing_df <- data.frame(

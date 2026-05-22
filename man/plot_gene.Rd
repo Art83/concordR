@@ -42,5 +42,5 @@ plot_gene("NEFL", sort_by = "rna")
 
 }
 \seealso{
-\code{\link{query_atlas}}, \code{\link{plot_audit}}
+\code{\link{query_atlas}}, \code{\link{query_tissue}}
 }

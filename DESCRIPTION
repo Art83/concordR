@@ -3,22 +3,21 @@ Title: Concordance-Aware Quality Control for Proteomic Interpretation
 Version: 0.1.0
 Authors@R: person("Artur", "Shvetcov", role = c("aut", "cre"),
                   email = "shvetsov1983@gmail.com")
-Description: Translates an atlas of RNA-protein concordance across human
-    tissues into a practical quality-control layer for proteomic studies.
-    Given a gene list from a proteomics experiment, concordR tells you what
-    you can and cannot conclude: which genes have reliable RNA-protein
-    concordance, which are suppressed at the protein level despite high
-    RNA, whether subcellular localisation is consistent with the measurement
-    compartment, and whether enrichment results survive concordance
-    correction. Built on an integrated atlas spanning 488,190 observations
-    across 11,154 genes, 24 tissues, and 53 cell types.
+Description: An atlas of RNA-protein concordance across human tissues,
+    packaged as a quality-control layer for biofluid proteomic studies.
+    Given a list of differentially abundant proteins from plasma or CSF,
+    concordR evaluates whether each gene's nomination is defensible:
+    whether its subcellular localisation is consistent with the sample
+    compartment, whether it is expressed at protein level in the
+    tissue relevant to the claim, and whether RNA reliably predicts
+    protein for that gene. Built on an integrated atlas spanning
+    488,190 observations across 11,154 genes, 24 tissues, and
+    53 cell types.
 License: MIT + file LICENSE
 URL: https://github.com/Art83/concordR
 BugReports: https://github.com/Art83/concordR/issues
 Depends: R (>= 4.1.0)
 Imports:
-    stats,
-    utils,
     graphics,
     grDevices
 Suggests:

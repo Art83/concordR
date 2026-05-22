@@ -10,11 +10,11 @@ triage(genes, sample_type, context_tissue = NULL)
 \item{genes}{Character vector of HGNC gene symbols.}
 
 \item{sample_type}{Character. The biological compartment where proteins
-were measured. See \code{\link{flag_genes}} for the full list.}
+were measured.}
 
 \item{context_tissue}{Character or \code{NULL}. Overrides automatic
 tissue inference. When supplied, narrows the tissue gate to this
-specific tissue. Brain is resolved as four regions — pass one
+specific tissue. Brain is resolved as four regions, pass one
 explicitly (e.g. \code{"Cerebellum"}), not \code{"Brain"}.}
 }
 \value{
@@ -33,7 +33,7 @@ relevant to the claim. Failure of any link breaks the chain.
 For substrate-specific biofluids, the package automatically infers
 which tissues are relevant: CSF implies the four brain regions
 (Caudate, Cerebellum, Cerebral cortex, Hippocampus), urine implies
-Kidney. Plasma and serum are systemic — no tissue is implied. When
+Kidney. Plasma and serum are systemic, no tissue is implied. When
 \code{context_tissue} is supplied, it overrides the automatic
 inference and narrows to the specified region.
 }
@@ -50,11 +50,11 @@ a tissue relevant to the claim (not merely secreted anywhere).
 at protein level (IHC, MS, or PaxDB) in at least one tissue
 implied by the substrate. Fires automatically for CSF and urine;
 always fires when \code{context_tissue} is supplied.
-\item \strong{Concordance class}: suppressed class — RNA does not
+\item \strong{Concordance class}: suppressed class-RNA does not
 predict protein. Cross-platform evidence (HPA vs GTEx) is
 evaluated using data from the relevant tissues only.
 \item \strong{Tissue specificity}: concordant and plausible, but
-broadly expressed — tissue-of-origin claims unsupported.
+broadly expressed-tissue-of-origin claims unsupported.
 }
 }
 
@@ -91,5 +91,5 @@ triage(c("AR", "ESR1", "CD274", "TP53"), sample_type = "plasma")
 
 }
 \seealso{
-\code{\link{flag_genes}}, \code{\link{audit_enrichment}}
+\code{\link{query_atlas}}
 }

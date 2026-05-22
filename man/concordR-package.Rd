@@ -6,50 +6,24 @@
 \alias{concordR-package}
 \title{concordR: Concordance-Aware Quality Control for Proteomic Interpretation}
 \description{
-An atlas of RNA--protein concordance across human tissues, packaged as
-a practical QC layer for proteomic studies. Seven functions, one job:
-given a gene list from a proteomics experiment, tell the user what they
-can and cannot conclude from it.
+An atlas of RNA-protein concordance across human tissues, packaged as
+a practical QC layer for biofluid proteomic studies. Five functions,
+one job: given a gene list from a proteomics experiment, tell the user
+what they can and cannot conclude from it.
 }
-\section{Core functions}{
-
-
-\strong{Understand your gene list:}
-\itemize{
-\item \code{\link{query_atlas}} — look up concordance class, suppression
-rate, mechanistic tier, and localisation for any gene.
-\item \code{\link{flag_genes}} — pre-analysis sanity check: classify
-genes by concordance reliability and compartment plausibility
-using binary localisation flags (is_secreted, is_membrane, etc.).
-}
-
-\strong{Audit your results:}
-\itemize{
-\item \code{\link{audit_enrichment}} — recompute enrichment with
-concordance weights; show what survives correction.
-}
-
-\strong{Interpret your candidates:}
-\itemize{
-\item \code{\link{triage}} — drug-target defensibility audit:
-concordance, compartment plausibility, tissue-of-origin coherence,
-and tissue specificity gates applied per gene.
-}
-
-\strong{Visualise:}
-\itemize{
-\item \code{\link{plot_gene}} — tissue-resolved concordance profile.
-\item \code{\link{plot_audit}} — standard vs corrected enrichment.
-}
-}
-
-\section{Atlas data}{
+\details{
+The core workflow: \code{\link{triage}()} evaluates drug-target
+defensibility through four gates (compartment plausibility,
+tissue-of-origin coherence, RNA--protein concordance, and tissue
+specificity). \code{\link{query_atlas}()} and
+\code{\link{query_tissue}()} provide direct atlas lookups.
+\code{\link{plot_gene}()} visualises tissue-resolved concordance
+profiles. \code{\link{load_atlas}()} manages session-cached data
+loading.
 
 Both the gene-level and tissue-resolved atlases ship as internal
-package data (\code{R/sysdata.rda}) and are loaded once per session
-via \code{\link{load_atlas}}. No network access is required.
+package data and require no network access.
 }
-
 \seealso{
 Useful links:
 \itemize{

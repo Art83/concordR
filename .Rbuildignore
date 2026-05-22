@@ -1,7 +1,7 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$
-^prep_atlas_data\.R$
-^concordR\.Rproj$
-^README\.Rmd$
+^data-raw$
 ^\.github$
+^README\.Rmd$
+^\.Rhistory$

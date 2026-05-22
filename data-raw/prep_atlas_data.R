@@ -404,7 +404,7 @@ gtex_rna_ts <- gtex_rna_raw[, c("ensembl_id", cols)] %>%
 # Augment tissue_atlas with external platforms
 # ===========================================================================
 # NOTE: tissue_atlas was built in section 6b above.
-#       No load("R/sysdata.rda") — that was a bug in previous versions
+#       No load("R/sysdata.rda").that was a bug in previous versions
 #       which silently overwrote the freshly-built tissue_atlas.
 
 tissue_atlas <- tissue_atlas %>%
