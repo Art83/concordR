@@ -267,7 +267,8 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
                      else rep(NA_character_, nrow(q)),
                      MoreArgs = list(
                        effective_tissue_names = paste(effective_tissues, collapse = ", "),
-                       is_systemic            = is_systemic
+                       is_systemic            = is_systemic,
+                       is_biofluid            = is_biofluid
                      ),
                      SIMPLIFY = FALSE)
   
@@ -466,7 +467,7 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
                            tissue_verdict, tissue_best_class,
                            cross_platform_agree, protein_evidence,
                            primary_tissue, specificity_class,
-                           effective_tissue_names, is_systemic)  {
+                           effective_tissue_names, is_systemic, is_biofluid)  {
   
   # Helper: describe why the tissue gate failed
   tissue_failure_text <- function() {
