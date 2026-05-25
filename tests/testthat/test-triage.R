@@ -43,12 +43,12 @@ test_that("triage passes secreted proteins in plasma", {
 
 # --- Gate 2: Tissue-of-origin ---
 
-test_that("triage catches tissue-origin mismatch in CSF", {
-  # SPANXA1 is testis-restricted, should fail tissue gate for CSF
-  res <- triage("SPANXA1", sample_type = "csf")
+test_that("triage catches tissue-origin mismatch with explicit tissue", {
+  res <- triage("SPANXA1", sample_type = "csf",
+                context_tissue = "Cerebral cortex")
   if (!is.na(res$verdict)) {
     expect_true(res$verdict %in% c("tissue_origin_mismatch",
-                                    "compartment_implausible"))
+                                   "compartment_implausible"))
   }
 })
 
