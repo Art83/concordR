@@ -35,7 +35,7 @@
 .SAMPLE_TISSUE_MAP <- list(
   plasma                 = NULL,
   serum                  = NULL,
-  csf                    = c("Caudate", "Cerebellum", "Cerebral cortex", "Hippocampus"),
+  csf                    = NULL,
   urine                  = "Kidney",
   cell_lysate            = NULL,
   tissue                 = NULL,

@@ -12,10 +12,11 @@
 #' relevant to the claim. Failure of any link breaks the chain.
 #'
 #' @section Automatic tissue inference:
-#' For substrate-specific biofluids, the package automatically infers
-#' which tissues are relevant: CSF implies the four brain regions
-#' (Caudate, Cerebellum, Cerebral cortex, Hippocampus), urine implies
-#' Kidney. Plasma and serum are systemic, no tissue is implied. When
+#' Most biofluids are systemic: plasma, serum, and CSF receive no
+#' automatic tissue gate. Although CSF is anatomically proximal to
+#' brain, approximately 80% of its protein content derives from
+#' plasma, making automatic brain attribution
+#' unsound. Urine implies Kidney. Plasma and serum are systemic, no tissue is implied. When
 #' \code{context_tissue} is supplied, it overrides the automatic
 #' inference and narrows to the specified region.
 #'
@@ -130,7 +131,6 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
   q$tissue_ms_detected         <- NA
   q$primary_tissue             <- NA_character_
   q$n_tissues_detected_relevant <- NA_integer_
-  tissue_mismatch              <- rep(FALSE, nrow(q))
   
   if (!is.null(effective_tissues) && !is.null(ta)) {
     tissue_info <- .compute_tissue_evidence(
@@ -147,11 +147,7 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
     q$tissue_ms_detected[matched]          <- tissue_info$ms_detected_any[idx[matched]]
     q$n_tissues_detected_relevant[matched] <- tissue_info$n_detected[idx[matched]]
     
-    # Tissue mismatch: gene is in tissue atlas for these tissues but
-    # not detected by ANY platform (IHC, MS, PaxDB)
-    not_detected <- matched & !is.na(q$tissue_detected_any) & !q$tissue_detected_any
-    absent       <- q$found & is.na(q$tissue_detected_any)
-    tissue_mismatch <- not_detected | absent
+
   }
   
   # --- Primary tissue (where is this gene most expressed?) ---
@@ -209,6 +205,7 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
   q$biofluid_note <- .biofluid_note(q)
   
   # --- Broadly-expressed flag ---
+  # --- Tissue gate: presence + specificity (merged) ---
   broad <- if ("specificity_class" %in% names(q)) {
     !is.na(q$specificity_class) & q$specificity_class == "broadly_expressed"
   } else if ("tau" %in% names(q)) {
@@ -217,8 +214,7 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
     rep(FALSE, nrow(q))
   }
   
-  # Protein-level breadth override: RNA tau can miss genes with
-  # moderate RNA variation but ubiquitous protein (e.g. TREM2).
+  # Protein-level breadth override
   if (!is.null(ta) && length(found_idx) > 0L) {
     pb <- .protein_tissue_breadth(q$gene_symbol[found_idx], ta)
     pb_idx <- match(toupper(q$gene_symbol), toupper(pb$gene_symbol))
@@ -229,14 +225,39 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
     broad <- broad | protein_broad
   }
   
+  q$tissue_verdict <- NA_character_
+  if (!is.null(effective_tissues)) {
+    for (i in found_idx) {
+      detected <- !is.na(q$tissue_detected_any[i]) & q$tissue_detected_any[i]
+      if (!detected) {
+        q$tissue_verdict[i] <- "not_detected"
+      } else if (broad[i]) {
+        concordant_here <- !is.na(q$tissue_best_class[i]) &
+          q$tissue_best_class[i] == "concordant_in_tissue"
+        if (concordant_here && !is_biofluid) {
+          q$tissue_verdict[i] <- "detected_concordant_broad"
+        } else {
+          q$tissue_verdict[i] <- "detected_ubiquitous"
+        }
+      } else {
+        q$tissue_verdict[i] <- "detected_specific"
+      }
+    }
+  } else if (is_biofluid) {
+    for (i in found_idx) {
+      q$tissue_verdict[i] <- if (broad[i]) "detected_ubiquitous" else "pass"
+    }
+  } else {
+    q$tissue_verdict[found_idx] <- "pass"
+  }
+  
   # --- Apply target verdicts ---
   verdicts <- mapply(.triage_target,
                      gc                    = q$gene_class,
                      lp                    = q$loc_plausible,
                      rescued               = q$compartment_rescue,
                      atlas_blind           = q$atlas_blind_spot,
-                     broad                 = broad,
-                     tissue_mismatch       = tissue_mismatch,
+                     tissue_verdict        = q$tissue_verdict,
                      tissue_best_class     = q$tissue_best_class,
                      cross_platform_agree  = q$tissue_cross_platform,
                      protein_evidence      = q$tissue_protein_evidence,
@@ -262,7 +283,7 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
                       "tissue_best_class", "tissue_detected_any",
                       "tissue_protein_evidence", "tissue_cross_platform",
                       "n_tissues_detected_relevant",
-                      "biofluid_note", "verdict", "reason")
+                      "biofluid_note", "tissue_verdict", "verdict", "reason")
   out_cols <- intersect(candidate_cols, names(q))
   q[, out_cols, drop = FALSE]
 }
@@ -441,11 +462,11 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
 #'
 #' @keywords internal
 #' @noRd
-.triage_target <- function(gc, lp, rescued, atlas_blind, broad,
-                           tissue_mismatch, tissue_best_class,
+.triage_target <- function(gc, lp, rescued, atlas_blind,
+                           tissue_verdict, tissue_best_class,
                            cross_platform_agree, protein_evidence,
                            primary_tissue, specificity_class,
-                           effective_tissue_names, is_systemic) {
+                           effective_tissue_names, is_systemic)  {
   
   # Helper: describe why the tissue gate failed
   tissue_failure_text <- function() {
@@ -486,9 +507,9 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
     extras <- character(0)
     if (gc == "consistently_suppressed")
       extras <- c(extras, "Also suppressed class; RNA evidence unreliable.")
-    if (broad)
+    if (!is.na(tissue_verdict) && tissue_verdict == "detected_ubiquitous")
       extras <- c(extras, "Also broadly expressed; tissue-of-origin unsupported.")
-    if (tissue_mismatch)
+    if (!is.na(tissue_verdict) && tissue_verdict == "not_detected")
       extras <- c(extras, paste("Also:", tolower(tissue_failure_text())))
     return(list(
       verdict = "compartment_implausible",
@@ -496,19 +517,18 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
     ))
   }
   
-  # --- Gate 2: tissue-of-origin ---
-  if (tissue_mismatch) {
+  # --- Gate 2: tissue (presence + specificity) ---
+  if (!is.na(tissue_verdict) && tissue_verdict == "not_detected") {
     r <- tissue_failure_text()
     extras <- character(0)
     if (gc == "consistently_suppressed")
       extras <- c(extras, "Also suppressed class; RNA evidence unreliable.")
-    if (broad)
-      extras <- c(extras, "Also broadly expressed.")
     return(list(
       verdict = "tissue_origin_mismatch",
       reason  = paste(c(r, extras), collapse = " ")
     ))
   }
+  is_broad <- !is.na(tissue_verdict) && tissue_verdict == "detected_ubiquitous"
   
   # Transparency note for rescued compartment gate
   rescue_note <- if (isTRUE(rescued))
@@ -565,7 +585,7 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
   
   if (gc == "variable") {
     r <- "Variable concordance; RNA-protein relationship is tissue-dependent."
-    if (broad)
+    if (is_broad)
       r <- paste(r, "Additionally broadly expressed; tissue-of-origin unsupported.")
     return(list(
       verdict = "caution",
@@ -597,17 +617,27 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
   
   # --- Gate 4: tissue specificity ---
   if (gc == "consistently_concordant") {
-    if (broad) {
-      broad_reason <- if (!is_systemic)
-        paste("Concordant and compartment-plausible, but broadly expressed",
-              "across tissues. CSF/biofluid detection likely reflects plasma",
-              "filtration rather than tissue-specific origin.")
+    if (is_broad) {
+      broad_reason <- if (is_biofluid)
+        paste("Concordant and compartment-plausible, but broadly expressed.",
+              "Biofluid detection likely reflects systemic sources",
+              "rather than tissue-specific origin.")
       else
         paste("Concordant and compartment-plausible, but broadly expressed",
               "across tissues. Tissue-of-origin claims unsupported.")
       return(list(
         verdict = "RNA-supported_but_broad",
         reason  = paste(c(rescue_note, broad_reason), collapse = " ")
+      ))
+    }
+    if (!is.na(tissue_verdict) && tissue_verdict == "detected_concordant_broad") {
+      return(list(
+        verdict = "RNA-supported",
+        reason  = paste(c(rescue_note,
+                          "Broadly expressed across tissues but concordant",
+                          "at protein level in", effective_tissue_names,
+                          "-- direct tissue evidence supports the claim."),
+                        collapse = " ")
       ))
     }
     return(list(

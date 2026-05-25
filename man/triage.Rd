@@ -30,10 +30,11 @@ relevant to the claim. Failure of any link breaks the chain.
 }
 \section{Automatic tissue inference}{
 
-For substrate-specific biofluids, the package automatically infers
-which tissues are relevant: CSF implies the four brain regions
-(Caudate, Cerebellum, Cerebral cortex, Hippocampus), urine implies
-Kidney. Plasma and serum are systemic, no tissue is implied. When
+Most biofluids are systemic: plasma, serum, and CSF receive no
+automatic tissue gate. Although CSF is anatomically proximal to
+brain, approximately 80\% of its protein content derives from
+plasma, making automatic brain attribution
+unsound. Urine implies Kidney. Plasma and serum are systemic, no tissue is implied. When
 \code{context_tissue} is supplied, it overrides the automatic
 inference and narrows to the specified region.
 }

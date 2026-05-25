@@ -30,16 +30,13 @@ library(concordR)
 
 
 # 1. Triage drug-target claims from a CSF study
-triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf")
-#>   gene_symbol                   verdict
-#> 1        NEFL             RNA-supported
-#> 2        GFAP             compartment_implausible    # Cytoplasmic protein in csf
-#> 3     SPANXA1  tissue_origin_mismatch    # testis-restricted
+triage(c("NEFL", "GFAP", "SPANXA1"),
+       sample_type    = "csf")
+
 
 # 2. Narrow to a specific brain region
-triage(c("NEFL", "GFAP", "SPANXA1"),
-       sample_type    = "csf",
-       context_tissue = "Cerebellum")
+triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf", context_tissue = "Cerebellum")
+
 
 # 3. Visualise a gene's tissue profile
 plot_gene("TREM2")
