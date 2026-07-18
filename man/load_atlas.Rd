@@ -4,19 +4,22 @@
 \alias{load_atlas}
 \title{Load the RNA--protein concordance atlas}
 \usage{
-load_atlas(component = c("gene", "tissue", "both"), reload = FALSE)
+load_atlas(component = c("gene", "tissue", "hpa", "both"), reload = FALSE)
 }
 \arguments{
 \item{component}{Character. \code{"gene"} (default) loads the gene-level
 summary atlas. \code{"tissue"} loads the tissue-resolved atlas.
-\code{"both"} loads both.}
+\code{"hpa"} loads the full HPA normal tissue IHC panel
+(localisation layer, ~44 tissues). \code{"both"} loads all three.}
 
 \item{reload}{Logical. Force reload from package data. Default \code{FALSE}.}
 }
 \value{
 For \code{"gene"}: a data frame (one row per gene). For
 \code{"tissue"}: a data frame (one row per gene x tissue). For
-\code{"both"}: a named list with elements \code{gene} and \code{tissue}.
+\code{"hpa"}: a data frame (one row per gene x tissue, full panel).
+For \code{"both"}: a named list with elements \code{gene},
+\code{tissue}, and \code{hpa}.
 }
 \description{
 Loads the precomputed atlas into a session cache. Subsequent calls

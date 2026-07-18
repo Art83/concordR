@@ -2,95 +2,58 @@
 % Please edit documentation in R/triage.R
 \name{triage}
 \alias{triage}
-\title{Triage candidate genes for drug target defensibility}
+\title{Audit candidate genes for biofluid drug-target defensibility}
 \usage{
 triage(genes, sample_type, context_tissue = NULL)
 }
 \arguments{
 \item{genes}{Character vector of HGNC gene symbols.}
 
-\item{sample_type}{Character. The biological compartment where proteins
-were measured.}
+\item{sample_type}{Character. The biofluid or fraction sampled.}
 
-\item{context_tissue}{Character or \code{NULL}. Overrides automatic
-tissue inference. When supplied, narrows the tissue gate to this
-specific tissue. Brain is resolved as four regions, pass one
-explicitly (e.g. \code{"Cerebellum"}), not \code{"Brain"}.}
+\item{context_tissue}{Character or \code{NULL}. Overrides automatic tissue
+inference. Brain must be one region (e.g. \code{"Cerebellum"}).}
 }
 \value{
-A data frame with atlas annotations plus verdict columns.
+A data frame, one row per gene, with the independent gate columns
+above plus a prose \code{reason}. No rollup verdict.
 }
 \description{
-Evaluates whether a gene's nomination as a drug target is defensible
-given the concordance atlas. Drug-target claims demand a coherent
-mechanistic chain: RNA must reliably predict protein, the protein
-must be plausibly detected in the sample compartment that nominated
-it, and the gene must be expressed at protein level in a tissue
-relevant to the claim. Failure of any link breaks the chain.
+Reports, per gene, what each gate independently found. There is no single
+verdict: each gate is its own controlled-vocabulary column, scored on its
+own data source and NA only where that source is silent. The caller filters
+and combines the columns, widest gate first, then narrowing into the atlas.
 }
 \section{Automatic tissue inference}{
 
-Most biofluids are systemic: plasma, serum, and CSF receive no
-automatic tissue gate. Although CSF is anatomically proximal to
-brain, approximately 80\% of its protein content derives from
-plasma, making automatic brain attribution
-unsound. Urine implies Kidney. Plasma and serum are systemic, no tissue is implied. When
-\code{context_tissue} is supplied, it overrides the automatic
-inference and narrows to the specified region.
+Plasma, serum, and CSF are systemic and receive no automatic tissue gate.
+Although CSF is anatomically proximal to brain, roughly 80\% of its protein
+derives from plasma, so automatic brain attribution is unsound. Urine
+implies Kidney. A supplied \code{context_tissue} overrides inference and
+narrows to that region. Brain must be given as one of four regions.
 }
 
-\section{Gates (in order of severity)}{
-
-\enumerate{
-\item \strong{Compartment plausibility}: subcellular localisation
-inconsistent with sample compartment. A damage-release rescue
-applies in biofluid contexts for projection-localised proteins,
-and a secretion rescue applies when the protein is secreted FROM
-a tissue relevant to the claim (not merely secreted anywhere).
-\item \strong{Tissue-of-origin coherence}: gene must be detected
-at protein level (IHC, MS, or PaxDB) in at least one tissue
-implied by the substrate. Fires automatically for CSF and urine;
-always fires when \code{context_tissue} is supplied.
-\item \strong{Concordance class}: suppressed class-RNA does not
-predict protein. Cross-platform evidence (HPA vs GTEx) is
-evaluated using data from the relevant tissues only.
-\item \strong{Tissue specificity}: concordant and plausible, but
-broadly expressed-tissue-of-origin claims unsupported.
-}
-}
-
-\section{Verdicts}{
+\section{Gate columns}{
 
 \describe{
-\item{\code{RNA-supported}}{All gates pass.}
-\item{\code{RNA-supported_but_broad}}{Concordant and plausible, but
-broadly expressed.}
-\item{\code{RNA-unreliable}}{Suppressed class, confirmed
-cross-platform. RNA evidence not defensible.}
-\item{\code{tissue_origin_mismatch}}{Gene not expressed at protein
-level in tissue(s) relevant to the claim.}
-\item{\code{compartment_implausible}}{Subcellular localisation
-inconsistent with sample compartment.}
-\item{\code{caution}}{Variable class, low expression, or suppressed
-but cross-platform disagreement.}
-\item{\code{NA}}{Gene not in atlas.}
+\item{\code{concordance}}{Atlas only. concordant, variable, suppressed,
+low_expression, not_in_atlas.}
+\item{\code{biofluid_plausibility}}{UniProt localisation, raw call.
+plausible, implausible, no_data.}
+\item{\code{biofluid_rescue}}{Logical. TRUE where a projection or secreted
+protein would be rescued in a biofluid (microscopy under-detects
+proteins that have left the cell of origin). Reported beside
+plausibility, not folded into it.}
+\item{\code{tissue}}{Union gate. detected, detected_1platform, discordant,
+mismatch, coverage_limited, not_in_panel, systemic_na.}
+\item{\code{specificity}}{HPA breadth. specific, broad, na.}
+\item{\code{protein_tissues}}{Tissues of detection, from the union gate,
+populated off-atlas.}
+\item{\code{rna_tissues}}{Atlas-bound, NA off-atlas.}
+\item{\code{reason}}{Prose summary for reading, not for filtering.}
 }
 }
 
-\examples{
-\dontrun{
-# CSF: automatically checks brain tissues
-triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf")
-
-# CSF narrowed to one region
-triage(c("NEFL", "GFAP", "SPANXA1"),
-       sample_type = "csf", context_tissue = "Cerebellum")
-
-# Plasma: systemic, no automatic tissue inference
-triage(c("AR", "ESR1", "CD274", "TP53"), sample_type = "plasma")
-}
-
-}
 \seealso{
 \code{\link{query_atlas}}
 }

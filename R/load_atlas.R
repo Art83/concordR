@@ -44,12 +44,15 @@
 #'
 #' @param component Character. \code{"gene"} (default) loads the gene-level
 #'   summary atlas. \code{"tissue"} loads the tissue-resolved atlas.
-#'   \code{"both"} loads both.
+#'   \code{"hpa"} loads the full HPA normal tissue IHC panel
+#'   (localisation layer, ~44 tissues). \code{"both"} loads all three.
 #' @param reload Logical. Force reload from package data. Default \code{FALSE}.
 #'
 #' @return For \code{"gene"}: a data frame (one row per gene). For
 #'   \code{"tissue"}: a data frame (one row per gene x tissue). For
-#'   \code{"both"}: a named list with elements \code{gene} and \code{tissue}.
+#'   \code{"hpa"}: a data frame (one row per gene x tissue, full panel).
+#'   For \code{"both"}: a named list with elements \code{gene},
+#'   \code{tissue}, and \code{hpa}.
 #'
 #' @examples
 #' \dontrun{
@@ -62,7 +65,7 @@
 #' }
 #'
 #' @export
-load_atlas <- function(component = c("gene", "tissue", "both"),
+load_atlas <- function(component = c("gene", "tissue", "hpa", "both"),
                        reload    = FALSE) {
   component <- match.arg(component)
 
@@ -93,10 +96,26 @@ load_atlas <- function(component = c("gene", "tissue", "both"),
     }
   }
 
+  if (component %in% c("hpa", "both")) {
+    if (isTRUE(reload) || is.null(.atlas_env$hpa)) {
+      if (exists("hpa_tissue", envir = asNamespace("concordR"),
+                 inherits = FALSE)) {
+        .atlas_env$hpa <- get("hpa_tissue",
+                              envir = asNamespace("concordR"))
+        if (inherits(.atlas_env$hpa, "data.table"))
+          .atlas_env$hpa <- as.data.frame(.atlas_env$hpa)
+      } else {
+        .atlas_env$hpa <- NULL
+      }
+    }
+  }
+
   switch(component,
     gene   = .atlas_env$gene,
     tissue = .atlas_env$tissue,
-    both   = list(gene = .atlas_env$gene, tissue = .atlas_env$tissue)
+    hpa    = .atlas_env$hpa,
+    both   = list(gene = .atlas_env$gene, tissue = .atlas_env$tissue,
+                  hpa = .atlas_env$hpa)
   )
 }
 
@@ -121,4 +140,34 @@ load_atlas <- function(component = c("gene", "tissue", "both"),
   if (inherits(.atlas_env$tissue, "data.table"))
     .atlas_env$tissue <- as.data.frame(.atlas_env$tissue)
   .atlas_env$tissue
+}
+
+
+#' Internal helper: ensure HPA full tissue panel is loaded
+#' @keywords internal
+#' @noRd
+.ensure_hpa_tissue <- function() {
+  if (is.null(.atlas_env$hpa)) load_atlas("hpa")
+  if (inherits(.atlas_env$hpa, "data.table"))
+    .atlas_env$hpa <- as.data.frame(.atlas_env$hpa)
+  .atlas_env$hpa
+}
+
+
+#' Internal helper: ensure localisation flags are loaded
+#' @keywords internal
+#' @noRd
+.ensure_localisation_flags <- function() {
+  if (is.null(.atlas_env$loc)) {
+    if (exists("localisation_flags", envir = asNamespace("concordR"),
+               inherits = FALSE)) {
+      .atlas_env$loc <- get("localisation_flags",
+                            envir = asNamespace("concordR"))
+      if (inherits(.atlas_env$loc, "data.table"))
+        .atlas_env$loc <- as.data.frame(.atlas_env$loc)
+    } else {
+      .atlas_env$loc <- NULL
+    }
+  }
+  .atlas_env$loc
 }
