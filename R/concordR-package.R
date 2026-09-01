@@ -7,7 +7,7 @@
 #'
 #' The core workflow: \code{\link{triage}()} evaluates drug-target
 #' defensibility through four gates (compartment plausibility,
-#' tissue-of-origin coherence, RNA--protein concordance, and tissue
+#' tissue-of-origin coherence, RNA-protein concordance, and tissue
 #' specificity). \code{\link{query_atlas}()} and
 #' \code{\link{query_tissue}()} provide direct atlas lookups.
 #' \code{\link{plot_gene}()} visualises tissue-resolved concordance

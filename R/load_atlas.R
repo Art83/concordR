@@ -1,12 +1,12 @@
 # =============================================================================
-# load_atlas — session-cached atlas loader
+# load_atlas, cached atlas loader
 # =============================================================================
 
 # Module-level cache (package environment)
 .atlas_env <- new.env(parent = emptyenv())
 
 
-#' Load the RNA--protein concordance atlas
+#' Load the RNA-protein concordance atlas
 #'
 #' Loads the precomputed atlas into a session cache. Subsequent calls
 #' within the same R session return the cached object without reloading.
@@ -134,9 +134,6 @@ load_atlas <- function(component = c("gene", "tissue", "hpa", "both"),
 #' @noRd
 .ensure_tissue_atlas <- function() {
   if (is.null(.atlas_env$tissue)) load_atlas("tissue")
-  # Coerce to plain data.frame: tissue_atlas may have been built with
-  # data.table, whose `[i, , drop = FALSE]` semantics differ from
-  # data.frame and produce wrong subsets in downstream code.
   if (inherits(.atlas_env$tissue, "data.table"))
     .atlas_env$tissue <- as.data.frame(.atlas_env$tissue)
   .atlas_env$tissue

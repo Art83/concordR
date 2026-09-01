@@ -2,7 +2,7 @@
 # query_atlas for gene-level lookup
 # =============================================================================
 
-#' Look up genes in the RNA--protein concordance atlas
+#' Look up genes in the RNA-protein concordance atlas
 #'
 #' The foundational accessor. Returns concordance class, protein confidence,
 #' detection rate, mechanistic tier, and subcellular localisation flags
@@ -99,12 +99,12 @@ query_atlas <- function(genes,
                                      "consistently_suppressed",
                                      "low_expression")))
   list(
-    n_queried     = length(genes),
-    n_found       = n,
-    n_concordant  = as.integer(classes["consistently_concordant"]),
-    n_variable    = as.integer(classes["variable"]),
-    n_suppressed  = as.integer(classes["consistently_suppressed"]),
-    n_low         = as.integer(classes["low_expression"]),
+    n_queried = length(genes),
+    n_found = n,
+    n_concordant = as.integer(classes["consistently_concordant"]),
+    n_variable = as.integer(classes["variable"]),
+    n_suppressed = as.integer(classes["consistently_suppressed"]),
+    n_low = as.integer(classes["low_expression"]),
     pct_concordant = if (n > 0) classes["consistently_concordant"] / n * 100
                      else NA_real_,
     pct_suppressed = if (n > 0) classes["consistently_suppressed"] / n * 100

@@ -1,5 +1,5 @@
 # =============================================================================
-# plot_gene - tissue-resolved concordance profile
+# plot_gene, tissue-resolved concordance profile
 # =============================================================================
 
 #' Plot tissue-resolved concordance profile for a gene
@@ -110,11 +110,11 @@ plot_gene <- function(gene,
   
   bp <- barplot(bar_vals,
                 names.arg = gene_data[[tissue_col]],
-                col       = cols,
-                border    = NA,
-                ylim      = c(0, max(bar_vals, na.rm = TRUE) * 1.1),
-                ylab      = "RNA expression rank",
-                main      = if (show_class)
+                col = cols,
+                border = NA,
+                ylim = c(0, max(bar_vals, na.rm = TRUE) * 1.1),
+                ylab = "RNA expression rank",
+                main = if (show_class)
                   paste0(gene, " (", gene_info$gene_class[1], ")")
                 else gene,
                 cex.names = 0.7,
@@ -133,9 +133,9 @@ plot_gene <- function(gene,
          title = "Bar = RNA rank, coloured by protein detection:",
          legend = c(">= 50% cell types", "1-50% cell types",
                     "Not detected", "Protein detection rate"),
-         fill   = c("#2E86AB", "#F6AE2D", "#E8432A", NA),
-         pch    = c(NA, NA, NA, 18),
-         col    = c(NA, NA, NA, "#1B1B1B"),
+         fill = c("#2E86AB", "#F6AE2D", "#E8432A", NA),
+         pch = c(NA, NA, NA, 18),
+         col = c(NA, NA, NA, "#1B1B1B"),
          border = NA, bty = "n", cex = 0.70, horiz = TRUE)
   par(xpd = FALSE)
 

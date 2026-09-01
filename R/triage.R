@@ -1,385 +1,422 @@
 # =============================================================================
-# triage: independent gate audit for biofluid drug-target nominations
+# triage: drug target defensibility
 # =============================================================================
-# Gates, decoupled by data source, each scored on its own footprint:
-#   biofluid_plausibility  localisation_flags (UniProt), proteome-wide
-#   tissue                 hpa_tissue (HPA + GTEx + PaxDb union), wide
-#   specificity            HPA protein breadth, wide
-#   concordance            concordance_atlas (the 11k atlas), narrow
-# No rollup verdict is returned; the columns are independent and the caller
-# combines them. tissue_atlas supplies only the cell-type IHC used by the
-# biofluid rescue and the suppressed cross-platform check.
 
-#' Audit candidate genes for biofluid drug-target defensibility
+#' Triage candidate genes for drug target defensibility
 #'
-#' Reports, per gene, what each gate independently found. There is no single
-#' verdict: each gate is its own controlled-vocabulary column, scored on its
-#' own data source and NA only where that source is silent. The caller filters
-#' and combines the columns, widest gate first, then narrowing into the atlas.
+#' Evaluates whether a gene's nomination as a drug target is defensible
+#' given the concordance atlas. Drug-target claims demand a coherent
+#' mechanistic chain: RNA must reliably predict protein, the protein
+#' must be plausibly detected in the sample compartment that nominated
+#' it, and the gene must be expressed at protein level in a tissue
+#' relevant to the claim. Failure of any link breaks the chain.
 #'
 #' @section Automatic tissue inference:
-#' Plasma, serum, and CSF are systemic and receive no automatic tissue gate.
-#' Although CSF is anatomically proximal to brain, roughly 80% of its protein
-#' derives from plasma, so automatic brain attribution is unsound. Urine
-#' implies Kidney. A supplied \code{context_tissue} overrides inference and
-#' narrows to that region. Brain must be given as one of four regions.
+#' Most biofluids are systemic: plasma, serum, and CSF receive no
+#' automatic tissue gate. Although CSF is anatomically proximal to
+#' brain, approximately 80% of its protein content derives from
+#' plasma, making automatic brain attribution
+#' unsound. Plasma and serum are systemic, no tissue is implied. When
+#' \code{context_tissue} is supplied, it overrides the automatic
+#' inference and narrows to the specified region.
 #'
-#' @section Gate columns:
+#' @section Gates:
+#' \enumerate{
+#'   \item \strong{Compartment plausibility}: subcellular localisation
+#'     inconsistent with sample compartment. A damage-release rescue
+#'     applies in biofluid contexts for projection-localised proteins,
+#'     and a secretion rescue applies when the protein is secreted FROM
+#'     a tissue relevant to the claim (not merely secreted anywhere).
+#'   \item \strong{Tissue-of-origin coherence}: gene must be detected
+#'     at protein level (three sources: IHC, MS, or PaxDB) in at least one tissue
+#'     implied by the substrate. Fires automatically for CSF and urine;
+#'     always fires when \code{context_tissue} is supplied.
+#'   \item \strong{Concordance class}: suppressed class-RNA does not
+#'     predict protein. Cross-platform evidence (HPA vs GTEx) is
+#'     evaluated using data from the relevant tissues only.
+#'   \item \strong{Tissue specificity}: concordant and plausible, but
+#'     broadly expressed-tissue-of-origin claims unsupported.
+#' }
+#'
+#' @section Verdicts:
 #' \describe{
-#'   \item{\code{concordance}}{Atlas only. concordant, variable, suppressed,
-#'     low_expression, not_in_atlas.}
-#'   \item{\code{biofluid_plausibility}}{UniProt localisation, raw call.
-#'     plausible, implausible, no_data.}
-#'   \item{\code{biofluid_rescue}}{Logical. TRUE where a projection or secreted
-#'     protein would be rescued in a biofluid (microscopy under-detects
-#'     proteins that have left the cell of origin). Reported beside
-#'     plausibility, not folded into it.}
-#'   \item{\code{tissue}}{Union gate. detected, detected_1platform, discordant,
-#'     mismatch, coverage_limited, not_in_panel, systemic_na.}
-#'   \item{\code{specificity}}{HPA breadth. specific, broad, na.}
-#'   \item{\code{protein_tissues}}{Tissues of detection, from the union gate,
-#'     populated off-atlas.}
-#'   \item{\code{rna_tissues}}{Atlas-bound, NA off-atlas.}
-#'   \item{\code{reason}}{Prose summary for reading, not for filtering.}
+#'   \item{\code{RNA-supported}}{All gates pass.}
+#'   \item{\code{RNA-supported_but_broad}}{Concordant and plausible, but
+#'     broadly expressed.}
+#'   \item{\code{RNA-unreliable}}{Suppressed class, confirmed
+#'     cross-platform. RNA evidence not defensible.}
+#'   \item{\code{tissue_origin_mismatch}}{Gene not expressed at protein
+#'     level in tissue(s) relevant to the claim.}
+#'   \item{\code{compartment_implausible}}{Subcellular localisation
+#'     inconsistent with sample compartment.}
+#'   \item{\code{caution}}{Variable class, low expression, or suppressed
+#'     but cross-platform disagreement.}
+#'   \item{\code{NA}}{Gene not in atlas.}
 #' }
 #'
 #' @param genes Character vector of HGNC gene symbols.
-#' @param sample_type Character. The biofluid or fraction sampled.
-#' @param context_tissue Character or \code{NULL}. Overrides automatic tissue
-#'   inference. Brain must be one region (e.g. \code{"Cerebellum"}).
+#' @param sample_type Character. The biological compartment where proteins
+#'   were measured.
+#' @param context_tissue Character or \code{NULL}. Overrides automatic
+#'   tissue inference. When supplied, narrows the tissue gate to this
+#'   specific tissue. Brain is resolved as four regions, pass one
+#'   explicitly (e.g. \code{"Cerebellum"}), not \code{"Brain"}.
 #'
-#' @return A data frame, one row per gene, with the independent gate columns
-#'   above plus a prose \code{reason}. No rollup verdict.
+#' @return A data frame with atlas annotations plus verdict columns.
+#'
+#' @examples
+#' \dontrun{
+#' # CSF: automatically checks brain tissues
+#' triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf")
+#'
+#' # CSF narrowed to one region
+#' triage(c("NEFL", "GFAP", "SPANXA1"),
+#'        sample_type = "csf", context_tissue = "Cerebellum")
+#'
+#' # Plasma: systemic, no automatic tissue inference
+#' triage(c("AR", "ESR1", "CD274", "TP53"), sample_type = "plasma")
+#' }
+#'
 #' @seealso \code{\link{query_atlas}}
 #' @export
 triage <- function(genes, sample_type, context_tissue = NULL) {
-
+  
   if (!is.character(genes) || length(genes) == 0L)
     stop("`genes` must be a non-empty character vector.")
+  
   if (missing(sample_type) || is.null(sample_type) ||
       !is.character(sample_type) || length(sample_type) != 1L)
     stop("`sample_type` is required (single character). Available: ",
          paste(.SAMPLE_TYPES, collapse = ", "), ".")
-
+  
   sample_type <- tolower(sample_type)
   if (!sample_type %in% .SAMPLE_TYPES)
     stop("Unknown `sample_type`: '", sample_type, "'. Available: ",
          paste(.SAMPLE_TYPES, collapse = ", "), ".")
-
-  # --- Concordance lookup (gene_class etc.) ---
+  
+  # --- Atlas annotations ---
   q <- query_atlas(genes, missing = "keep")
-
-  # --- Localisation: single UniProt source for every gene ---
-  q <- .attach_localisation(q, .ensure_localisation_flags())
-  q$loc_plausible <- .check_plausibility(q, sample_type)
-  q$localisation  <- .location_labels(q)
-
-  # --- Resolve effective tissues (HPA namespace) ---
-  hpa <- .ensure_hpa_tissue()
-  ta  <- .ensure_tissue_atlas()
-  is_biofluid <- sample_type %in% c("plasma", "serum", "csf")
-
+  found_idx <- which(q$found)
+  
+  # --- Compartment plausibility (found rows only) ---
+  q$loc_plausible <- NA
+  if (length(found_idx) > 0L) {
+    q$loc_plausible[found_idx] <-
+      .check_plausibility(q[found_idx, , drop = FALSE], sample_type)
+  }
+  
+  # --- Resolve effective tissues ---
   implied_tissues <- .SAMPLE_TISSUE_MAP[[sample_type]]
+  is_biofluid     <- sample_type %in% c("plasma", "serum", "csf")
+  is_systemic     <- is.null(implied_tissues) && is.null(context_tissue)
+  
+  # Always load tissue atlas: needed for protein breadth and primary
+  # tissue even when no tissue gate fires (systemic biofluids).
+  ta <- .ensure_tissue_atlas()
+  
   if (!is.null(context_tissue)) {
-    effective_tissues <- .validate_context_tissue(context_tissue,
-                                                  unique(hpa$tissue))
+    resolved_tissue   <- .validate_context_tissue(context_tissue, ta)
+    effective_tissues  <- resolved_tissue
+  } else if (!is.null(implied_tissues)) {
+    effective_tissues  <- implied_tissues
   } else {
-    effective_tissues <- implied_tissues
+    effective_tissues  <- NULL
   }
-  is_systemic       <- is.null(effective_tissues)
-  tissue_gate_active <- !is.null(effective_tissues)
+  
+  # --- Compute tissue-level evidence for effective tissues ---
+  q$tissue_detected_any <- NA
+  q$tissue_best_class <- NA_character_
+  q$tissue_protein_evidence <- NA_integer_
+  q$tissue_cross_platform <- NA_real_
+  q$tissue_ms_detected <- NA
+  q$primary_tissue <- NA_character_
+  q$n_tissues_detected_relevant <- NA_integer_
+  
+  if (!is.null(effective_tissues) && !is.null(ta)) {
+    tissue_info <- .compute_tissue_evidence(
+      q$gene_symbol, ta, effective_tissues
+    )
+    # merge by gene_symbol
+    idx <- match(toupper(q$gene_symbol), toupper(tissue_info$gene_symbol))
+    matched <- !is.na(idx)
+    
+    q$tissue_detected_any[matched] <- tissue_info$detected_any[idx[matched]]
+    q$tissue_best_class[matched] <- tissue_info$best_class[idx[matched]]
+    q$tissue_protein_evidence[matched] <- tissue_info$max_protein_evidence[idx[matched]]
+    q$tissue_cross_platform[matched] <- tissue_info$cross_platform_agree[idx[matched]]
+    q$tissue_ms_detected[matched] <- tissue_info$ms_detected_any[idx[matched]]
+    q$n_tissues_detected_relevant[matched] <- tissue_info$n_detected[idx[matched]]
+    
 
-  # Atlas-namespace equivalents for the tissue_atlas-side checks
-  atlas_effective <- if (tissue_gate_active)
-    stats::na.omit(.hpa_to_atlas_tissue(effective_tissues, ta)) else character(0)
-
-  # --- Tissue gate from hpa_tissue verdict ---
-  q$tissue_status           <- NA_character_
-  q$tissue_detected_any     <- FALSE
-  q$n_relevant_insufficient <- NA_integer_
-  q$insufficient_tissues    <- NA_character_
-  if (tissue_gate_active) {
-    ts  <- .tissue_status_from_hpa(q$gene_symbol, hpa, effective_tissues)
-    idx <- match(toupper(q$gene_symbol), toupper(ts$gene_symbol))
-    q$tissue_status           <- ts$tissue_status[idx]
-    q$tissue_detected_any     <- ts$tissue_detected_any[idx]
-    q$n_relevant_insufficient <- ts$n_relevant_insufficient[idx]
-    q$insufficient_tissues    <- ts$insufficient_tissues[idx]
   }
-
-  # --- Primary tissue and protein breadth (full HPA panel, all genes) ---
-  primary <- .compute_primary_tissue(q$gene_symbol, hpa)
-  q$primary_tissue <- primary$primary_tissue[
-    match(toupper(q$gene_symbol), toupper(primary$gene_symbol))]
-
-  pb <- .protein_tissue_breadth_hpa(q$gene_symbol, hpa)
-  q$protein_breadth <- pb$protein_breadth[
-    match(toupper(q$gene_symbol), toupper(pb$gene_symbol))]
-  q$broad <- !is.na(q$protein_breadth) & q$protein_breadth >= .BROAD_BREADTH
-
-  # --- Biofluid rescue (projection/secreted blind spot) ---
-  # Surfaced as its own boolean. Raw localisation plausibility is left intact
-  # so biofluid_plausibility reports the localisation call alone.
-  q$biofluid_rescue  <- FALSE
-  q$atlas_blind_spot <- FALSE
-  if (is_biofluid) {
-    is_proj <- !is.na(q$is_projection) & q$is_projection == 1
-    is_sec  <- !is.na(q$is_secreted)   & q$is_secreted   == 1
+  
+  # --- Primary tissue (where is this gene most expressed?) ---
+  # Computed from full tissue atlas, not just effective tissues
+  if (!is.null(ta) && length(found_idx) > 0L) {
+    primary <- .compute_primary_tissue(q$gene_symbol[found_idx], ta)
+    pidx <- match(toupper(q$gene_symbol), toupper(primary$gene_symbol))
+    pmatched <- !is.na(pidx)
+    q$primary_tissue[pmatched] <- primary$primary_tissue[pidx[pmatched]]
+  }
+  
+  # --- Atlas blind-spot rescue (tissue-aware) ---
+  q$compartment_rescue <- FALSE
+  q$atlas_blind_spot   <- FALSE
+  if (is_biofluid && length(found_idx) > 0L) {
+    is_proj <- "is_projection" %in% names(q) &
+      !is.na(q$is_projection) & q$is_projection == 1
+    is_sec  <- "is_secreted"   %in% names(q) &
+      !is.na(q$is_secreted)   & q$is_secreted   == 1
+    
     if (is_systemic) {
-      blind <- is_proj | is_sec
+      blind_mask <- (is_proj | is_sec)
     } else {
-      proj_expressed <- is_proj & q$tissue_detected_any
-      sec_expressed  <- is_sec &
-        .check_ihc_in_tissues(q$gene_symbol, ta, atlas_effective)
-      blind <- proj_expressed | sec_expressed
+      # Projection proteins: IHC under-detects, so any tissue-level
+      # evidence (IHC, MS, PaxDB) in relevant tissues justifies rescue
+      proj_expressed <- is_proj & !is.na(q$tissue_detected_any) & q$tissue_detected_any
+      
+      # Secreted proteins: bulk MS/PaxDB can't distinguish real tissue
+      # expression from blood contamination. Only IHC cell-type detection
+      # (detect_fraction > 0) confirms the protein is made in this tissue.
+      sec_expressed <- is_sec & .check_ihc_in_tissues(
+        q$gene_symbol, ta, effective_tissues
+      )
+      
+      blind_mask <- proj_expressed | sec_expressed
     }
-    blind[is.na(blind)] <- FALSE
-    q$atlas_blind_spot[blind] <- TRUE
-    # Rescue only flags genes whose raw localisation looked implausible.
-    rescue <- blind & !is.na(q$loc_plausible) & !q$loc_plausible
-    q$biofluid_rescue[rescue] <- TRUE
+    blind_mask[is.na(blind_mask)] <- FALSE
+    q$atlas_blind_spot[blind_mask] <- TRUE
+    
+    rescue_mask <- blind_mask & !is.na(q$loc_plausible) & !q$loc_plausible
+    if (any(rescue_mask)) {
+      q$compartment_rescue[rescue_mask] <- TRUE
+      q$loc_plausible[rescue_mask]      <- TRUE
+    }
   }
-
-  # --- Suppressed cross-platform evidence (tissue-filtered) ---
-  xp <- .suppressed_xplatform(q$gene_symbol, ta, atlas_effective)
-  q$cross_platform_agree <- xp$cross_platform_agree[
-    match(toupper(q$gene_symbol), toupper(xp$gene_symbol))]
-  q$protein_evidence <- xp$protein_evidence[
-    match(toupper(q$gene_symbol), toupper(xp$gene_symbol))]
-
+  
+  # --- Localisation label ---
+  q$localisation <- NA_character_
+  if (length(found_idx) > 0L) {
+    q$localisation[found_idx] <-
+      .location_labels(q[found_idx, , drop = FALSE])
+  }
+  
   # --- Biofluid interpretation note ---
   q$biofluid_note <- .biofluid_note(q)
-
-  # --- Gate columns: each scored on its own data footprint, no rollup -------
-  # Concordance (atlas only, not_in_atlas where the gene has no class).
-  q$concordance <- c(
-    consistently_concordant = "concordant",
-    variable                = "variable",
-    consistently_suppressed = "suppressed",
-    low_expression          = "low_expression"
-  )[q$gene_class]
-  q$concordance[is.na(q$concordance)] <- "not_in_atlas"
-
-  # Biofluid plausibility (UniProt localisation only, raw call). The rescue is
-  # reported separately in biofluid_rescue, not folded in here.
-  q$biofluid_plausibility <- ifelse(
-    is.na(q$loc_plausible), "no_data",
-    ifelse(q$loc_plausible, "plausible", "implausible"))
-
-  # Tissue (union gate only). systemic_na means no tissue-of-origin gate ran.
-  .TMAP <- c(detected = "detected", detected_weak = "detected_1platform",
-             discordant = "discordant", absent = "mismatch",
-             coverage_unknown = "coverage_limited", not_in_panel = "not_in_panel")
-  q$tissue <- ifelse(is.na(q$tissue_status), "systemic_na", .TMAP[q$tissue_status])
-
-  # Specificity (HPA breadth only).
-  q$specificity <- ifelse(is.na(q$protein_breadth), "na",
-                          ifelse(q$broad, "broad", "specific"))
-
-  # protein_tissues from the union gate (populated off-atlas); rna_tissues
-  # stays atlas-bound and NA off-atlas, since there is no RNA to list.
-  q$protein_tissues <- .protein_tissues_from_gate(q$gene_symbol, hpa)
-
-  # Suppressed-class rescue flag, retained for the prose reason only.
-  supp_rescued <- q$concordance == "suppressed" &
-    (q$atlas_blind_spot %in% TRUE |
-       (!is.na(q$cross_platform_agree) & q$cross_platform_agree < 0.3 &
-          !is.na(q$protein_evidence)   & q$protein_evidence >= 2))
-
-  # --- Prose reason (for humans, not for filtering) -------------------------
-  where <- if (nzchar(paste(effective_tissues, collapse = "")))
-    paste0(" in ", paste(effective_tissues, collapse = ", ")) else ""
-  q$reason <- .reason_from_axes(q$concordance, q$biofluid_plausibility,
-                                q$biofluid_rescue, q$tissue, q$specificity,
-                                supp_rescued, where)
-
-  # --- Output: independent gate columns, no verdict -------------------------
-  candidate_cols <- c("gene_symbol",
-                      "concordance", "biofluid_plausibility", "biofluid_rescue",
-                      "tissue", "specificity",
-                      "primary_tissue", "protein_breadth", "tissue_detected_any",
-                      "biofluid_note", "protein_confidence", "detection_rate",
-                      "localisation", "protein_tissues", "rna_tissues", "reason")
-  q[, intersect(candidate_cols, names(q)), drop = FALSE]
+  
+  # --- Broadly-expressed flag ---
+  # --- Tissue gate: presence + specificity (merged) ---
+  broad <- if ("specificity_class" %in% names(q)) {
+    !is.na(q$specificity_class) & q$specificity_class == "broadly_expressed"
+  } else if ("tau" %in% names(q)) {
+    !is.na(q$tau) & q$tau < 0.20
+  } else {
+    rep(FALSE, nrow(q))
+  }
+  
+  # Protein-level breadth override
+  if (!is.null(ta) && length(found_idx) > 0L) {
+    pb <- .protein_tissue_breadth(q$gene_symbol[found_idx], ta)
+    pb_idx <- match(toupper(q$gene_symbol), toupper(pb$gene_symbol))
+    pb_matched <- !is.na(pb_idx)
+    protein_broad <- rep(FALSE, nrow(q))
+    protein_broad[pb_matched] <- !is.na(pb$protein_breadth[pb_idx[pb_matched]]) &
+      pb$protein_breadth[pb_idx[pb_matched]] >= 0.75
+    broad <- broad | protein_broad
+  }
+  
+  q$tissue_verdict <- NA_character_
+  if (!is.null(effective_tissues)) {
+    for (i in found_idx) {
+      detected <- !is.na(q$tissue_detected_any[i]) & q$tissue_detected_any[i]
+      if (!detected) {
+        q$tissue_verdict[i] <- "not_detected"
+      } else if (broad[i]) {
+        concordant_here <- !is.na(q$tissue_best_class[i]) &
+          q$tissue_best_class[i] == "concordant_in_tissue"
+        if (concordant_here && !is_biofluid) {
+          q$tissue_verdict[i] <- "detected_concordant_broad"
+        } else {
+          q$tissue_verdict[i] <- "detected_ubiquitous"
+        }
+      } else {
+        q$tissue_verdict[i] <- "detected_specific"
+      }
+    }
+  } else if (is_biofluid) {
+    for (i in found_idx) {
+      q$tissue_verdict[i] <- if (broad[i]) "detected_ubiquitous" else "pass"
+    }
+  } else {
+    q$tissue_verdict[found_idx] <- "pass"
+  }
+  
+  # --- Apply target verdicts ---
+  verdicts <- mapply(.triage_target,
+                     gc = q$gene_class,
+                     lp = q$loc_plausible,
+                     rescued = q$compartment_rescue,
+                     atlas_blind = q$atlas_blind_spot,
+                     tissue_verdict = q$tissue_verdict,
+                     tissue_best_class = q$tissue_best_class,
+                     cross_platform_agree = q$tissue_cross_platform,
+                     protein_evidence = q$tissue_protein_evidence,
+                     primary_tissue = q$primary_tissue,
+                     specificity_class = if ("specificity_class" %in% names(q))
+                       q$specificity_class
+                     else rep(NA_character_, nrow(q)),
+                     MoreArgs = list(
+                       effective_tissue_names = paste(effective_tissues, collapse = ", "),
+                       is_systemic = is_systemic,
+                       is_biofluid = is_biofluid
+                     ),
+                     SIMPLIFY = FALSE)
+  
+  q$verdict <- vapply(verdicts, `[[`, character(1), "verdict")
+  q$reason  <- vapply(verdicts, `[[`, character(1), "reason")
+  
+  # --- Output columns ---
+  candidate_cols <- c("gene_symbol", "gene_class", "protein_confidence",
+                      "detection_rate", "mechanism_tier",
+                      "localisation", "loc_plausible",
+                      "compartment_rescue", "atlas_blind_spot",
+                      "tau", "specificity_class", "primary_tissue",
+                      "tissue_best_class", "tissue_detected_any",
+                      "tissue_protein_evidence", "tissue_cross_platform",
+                      "n_tissues_detected_relevant",
+                      "biofluid_note", "tissue_verdict", "verdict", "reason")
+  out_cols <- intersect(candidate_cols, names(q))
+  q[, out_cols, drop = FALSE]
 }
 
 
-#' Protein breadth above which a gene is treated as broadly expressed.
-#' @keywords internal
-#' @noRd
-.BROAD_BREADTH <- 0.65
-
-
 # =============================================================================
-# Data assembly helpers
+# Tissue evidence helpers
 # =============================================================================
 
-#' Attach localisation flags from the single UniProt source onto every gene.
+#' Compute per-gene tissue evidence for a set of target tissues
+#'
+#' Multi-evidence detection: a gene is "detected" in a tissue if ANY
+#' platform sees it (IHC detect_fraction > 0, GTEx MS, or PaxDB).
+#'
+#' @param gene_symbols Character vector.
+#' @param tissue_atlas Tissue-resolved atlas data frame.
+#' @param tissues Character vector of tissue names to check.
+#' @return Data frame with one row per gene.
 #' @keywords internal
 #' @noRd
-.attach_localisation <- function(q, loc) {
-  for (col in .LOC_COLS) q[[col]] <- NA_integer_
-  if (is.null(loc) || nrow(loc) == 0L) return(q)
-  idx     <- match(toupper(q$gene_symbol), toupper(loc$gene_symbol))
-  matched <- !is.na(idx)
-  for (col in intersect(.LOC_COLS, names(loc)))
-    q[[col]][matched] <- as.integer(loc[[col]][idx[matched]])
-  q
-}
+.compute_tissue_evidence <- function(gene_symbols, tissue_atlas, tissues) {
+  
+  ta_sub <- tissue_atlas[tissue_atlas$ts_tissue %in% tissues &
+                           toupper(tissue_atlas$gene_symbol) %in% toupper(gene_symbols), ,
+                         drop = FALSE]
+  
+  if (nrow(ta_sub) == 0L) {
+    return(data.frame(
+      gene_symbol = gene_symbols,
+      detected_any = NA,
+      best_class = NA_character_,
+      max_protein_evidence = NA_integer_,
+      cross_platform_agree = NA_real_,
+      ms_detected_any = NA,
+      n_detected = NA_integer_,
+      stringsAsFactors = FALSE
+    ))
+  }
+  
 
+  ihc_det <- !is.na(ta_sub$detect_fraction) & ta_sub$detect_fraction > 0
+  ms_det  <- if ("ms_detected" %in% names(ta_sub))
+    !is.na(ta_sub$ms_detected) & ta_sub$ms_detected
+  else rep(FALSE, nrow(ta_sub))
+  pax_det <- if ("paxdb_detected" %in% names(ta_sub))
+    !is.na(ta_sub$paxdb_detected) & ta_sub$paxdb_detected
+  else rep(FALSE, nrow(ta_sub))
+  ta_sub$any_detected <- ihc_det | ms_det | pax_det
+  ta_sub$ms_det <- ms_det
+  
+  if (!"protein_evidence_sources" %in% names(ta_sub)) {
+    ta_sub$protein_evidence_sources <- as.integer(ihc_det) +
+      as.integer(ms_det) +
+      as.integer(pax_det)
+  }
+  
 
-#' Gene-level tissue status over the relevant tissues, from hpa_tissue.
-#'
-#' Presence in any relevant tissue wins. Corroborated absence (verdict
-#' \code{concordant_absent}) only registers when nothing was detected. Single
-#' platform (\code{detected_by_one}, \code{insufficient_coverage}) and absent
-#' panel coverage are tracked so the verdict can report them without rejecting.
-#'
-#' @return Data frame: gene_symbol, tissue_status, tissue_detected_any,
-#'   n_relevant_insufficient, insufficient_tissues.
-#' @keywords internal
-#' @noRd
-.tissue_status_from_hpa <- function(gene_symbols, hpa, tissues) {
-  n   <- length(gene_symbols)
-  out <- data.frame(
-    gene_symbol             = gene_symbols,
-    tissue_status           = NA_character_,
-    tissue_detected_any     = FALSE,
-    n_relevant_insufficient = 0L,
-    insufficient_tissues    = NA_character_,
-    stringsAsFactors        = FALSE
+  class_rank <- c("concordant_in_tissue" = 1L, "variable_in_tissue" = 2L,
+                  "suppressed_in_tissue" = 3L, "low_expression" = 4L)
+  ta_sub$class_rank <- class_rank[ta_sub$tissue_class]
+  
+  # Aggregate per gene
+  key <- toupper(ta_sub$gene_symbol)
+  agg <- data.frame(
+    gene_symbol_upper = tapply(key, key, `[`, 1),
+    detected_any = as.logical(tapply(ta_sub$any_detected, key, any, na.rm = TRUE)),
+    max_protein_evidence = as.integer(tapply(ta_sub$protein_evidence_sources, key, max, na.rm = TRUE)),
+    ms_detected_any = as.logical(tapply(ta_sub$ms_det, key, any, na.rm = TRUE)),
+    n_detected = as.integer(tapply(ta_sub$any_detected, key, sum, na.rm = TRUE)),
+    best_rank = tapply(ta_sub$class_rank, key, min, na.rm = TRUE),
+    stringsAsFactors = FALSE
   )
-  sub <- hpa[hpa$tissue %in% tissues &
-               toupper(hpa$gene_symbol) %in% toupper(gene_symbols), ,
-             drop = FALSE]
-  key <- toupper(gene_symbols)
-
-  for (i in seq_len(n)) {
-    rows <- sub[toupper(sub$gene_symbol) == key[i], , drop = FALSE]
-    rows <- rows[!is.na(rows$verdict), , drop = FALSE]   # ignore unscored cells
-    if (nrow(rows) == 0L) {
-      out$tissue_status[i] <- "not_in_panel"
-      next
-    }
-    v      <- rows$verdict
-    insuff <- rows$tissue[v == "insufficient_coverage"]
-    out$n_relevant_insufficient[i] <- length(insuff)
-    if (length(insuff))
-      out$insufficient_tissues[i] <- paste(sort(unique(insuff)), collapse = ", ")
-
-    out$tissue_status[i] <-
-      if (any(v == "detected", na.rm = TRUE))               "detected"
-      else if (any(v == "detected_by_one", na.rm = TRUE))    "detected_weak"
-      else if (any(v == "discordant", na.rm = TRUE))         "discordant"
-      else if (any(v == "concordant_absent", na.rm = TRUE))  "absent"
-      else                                                   "coverage_unknown"
-
-    out$tissue_detected_any[i] <-
-      out$tissue_status[i] %in% c("detected", "detected_weak", "discordant")
+  
+  # Cross-platform agreement
+  if ("platforms_agree" %in% names(ta_sub)) {
+    agg$cross_platform_agree <- tapply(ta_sub$platforms_agree, key, mean, na.rm = TRUE)
+  } else {
+    agg$cross_platform_agree <- NA_real_
   }
-  out
+  
+  # Map rank back to class name
+  rank_to_class <- setNames(names(class_rank), as.character(class_rank))
+  agg$best_class <- rank_to_class[as.character(agg$best_rank)]
+  agg$best_class[!is.finite(agg$best_rank)] <- NA_character_
+  
+  # Fix -Inf from max on empty
+  agg$max_protein_evidence[!is.finite(agg$max_protein_evidence)] <- NA_integer_
+  
+  # Map back to original gene symbols
+  gene_key <- toupper(gene_symbols)
+  idx <- match(gene_key, agg$gene_symbol_upper)
+  
+  data.frame(
+    gene_symbol = gene_symbols,
+    detected_any = agg$detected_any[idx],
+    best_class = agg$best_class[idx],
+    max_protein_evidence = agg$max_protein_evidence[idx],
+    cross_platform_agree = agg$cross_platform_agree[idx],
+    ms_detected_any = agg$ms_detected_any[idx],
+    n_detected  = agg$n_detected[idx],
+    stringsAsFactors = FALSE
+  )
 }
 
 
-#' Primary tissue of expression, from the union gate.
+#' Find the primary tissue of expression for each gene
 #'
-#' Among the tissues where the gene is detected, narrows to the leaders by
-#' n_detected, then ihc_max_level, then ihc_n_detected, using only keys that
-#' have a value. Returns the single leading tissue; "multiple" when two or more
-#' are tied on every available key, which is an honest tie at vote resolution
-#' rather than a measured abundance tie; NA when the gene is detected nowhere.
+#' Returns the tissue with highest rna_rank_max for each gene.
+#' Used to report WHERE a tissue-specific gene is expressed.
+#'
 #' @keywords internal
 #' @noRd
-.compute_primary_tissue <- function(gene_symbols, hpa) {
-  out <- rep(NA_character_, length(gene_symbols))
-  sub <- hpa[toupper(hpa$gene_symbol) %in% toupper(gene_symbols) &
-               hpa$any_detected %in% TRUE, , drop = FALSE]
-  if (nrow(sub) == 0L)
-    return(data.frame(gene_symbol = gene_symbols, primary_tissue = out,
-                      stringsAsFactors = FALSE))
-
-  parts <- split(sub, toupper(sub$gene_symbol))
-  for (i in seq_along(gene_symbols)) {
-    rows <- parts[[toupper(gene_symbols[i])]]
-    if (is.null(rows) || nrow(rows) == 0L) next     # detected nowhere -> NA
-
-    cand <- rows
-    for (k in c("n_detected", "ihc_max_level", "ihc_n_detected")) {
-      v <- cand[[k]]
-      if (all(is.na(v))) next                       # key has no value, skip it
-      m <- max(v, na.rm = TRUE)
-      cand <- cand[!is.na(v) & v == m, , drop = FALSE]
-    }
-    out[i] <- if (nrow(cand) == 1L) cand$tissue[1L] else "multiple"
-  }
-  data.frame(gene_symbol = gene_symbols, primary_tissue = out,
-             stringsAsFactors = FALSE)
-}
-
-
-#' Protein tissue breadth, full HPA panel. Fraction of tissues with confident
-#' detection (Medium/High IHC or two-platform agreement).
-#' @keywords internal
-#' @noRd
-.protein_tissue_breadth_hpa <- function(gene_symbols, hpa) {
-  n_total <- length(unique(hpa$tissue))
-  sub <- hpa[toupper(hpa$gene_symbol) %in% toupper(gene_symbols), , drop = FALSE]
-  if (nrow(sub) == 0L)
+.compute_primary_tissue <- function(gene_symbols, tissue_atlas) {
+  ta_sub <- tissue_atlas[toupper(tissue_atlas$gene_symbol) %in% toupper(gene_symbols), ,
+                         drop = FALSE]
+  
+  if (nrow(ta_sub) == 0L) {
     return(data.frame(gene_symbol = gene_symbols,
-                      protein_breadth = NA_real_, stringsAsFactors = FALSE))
-
-  det_col <- if ("confident_detected" %in% names(sub))
-    "confident_detected" else "any_detected"
-  key   <- toupper(sub$gene_symbol)
-  n_det <- tapply(sub[[det_col]], key, sum, na.rm = TRUE)
-  idx   <- match(toupper(gene_symbols), names(n_det))
-  data.frame(gene_symbol = gene_symbols,
-             protein_breadth = as.numeric(n_det[idx]) / n_total,
-             stringsAsFactors = FALSE)
-}
-
-
-#' Cell-type IHC detection in the relevant atlas tissues (secreted rescue).
-#' @keywords internal
-#' @noRd
-.check_ihc_in_tissues <- function(gene_symbols, tissue_atlas, atlas_tissues) {
-  if (length(atlas_tissues) == 0L) return(rep(FALSE, length(gene_symbols)))
-  sub <- tissue_atlas[tissue_atlas$ts_tissue %in% atlas_tissues &
-                        toupper(tissue_atlas$gene_symbol) %in% toupper(gene_symbols), ,
-                      drop = FALSE]
-  if (nrow(sub) == 0L) return(rep(FALSE, length(gene_symbols)))
-  key     <- toupper(sub$gene_symbol)
-  any_ihc <- tapply(!is.na(sub$detect_fraction) & sub$detect_fraction > 0,
-                    key, any, na.rm = TRUE)
-  res <- as.logical(any_ihc[match(toupper(gene_symbols), names(any_ihc))])
-  res[is.na(res)] <- FALSE
-  res
-}
-
-
-#' Suppressed cross-platform evidence in the relevant atlas tissues.
-#' @keywords internal
-#' @noRd
-.suppressed_xplatform <- function(gene_symbols, tissue_atlas, atlas_tissues) {
-  base <- data.frame(gene_symbol = gene_symbols,
-                     cross_platform_agree = NA_real_,
-                     protein_evidence = NA_integer_, stringsAsFactors = FALSE)
-  if (length(atlas_tissues) == 0L) return(base)
-  sub <- tissue_atlas[tissue_atlas$ts_tissue %in% atlas_tissues &
-                        toupper(tissue_atlas$gene_symbol) %in% toupper(gene_symbols), ,
-                      drop = FALSE]
-  if (nrow(sub) == 0L) return(base)
-  key   <- toupper(sub$gene_symbol)
-  agree <- tapply(sub$platforms_agree, key,
-                  function(x) { m <- mean(x, na.rm = TRUE)
-                               if (is.nan(m)) NA_real_ else m })
-  pev   <- tapply(sub$protein_evidence_sources, key,
-                  function(x) { m <- max(x, na.rm = TRUE)
-                               if (is.finite(m)) as.integer(m) else NA_integer_ })
-  gkey <- toupper(gene_symbols)
-  base$cross_platform_agree <- as.numeric(agree[match(gkey, names(agree))])
-  base$protein_evidence     <- as.integer(pev[match(gkey, names(pev))])
-  base
+                      primary_tissue = NA_character_,
+                      stringsAsFactors = FALSE))
+  }
+  
+  ta_sub <- ta_sub[order(-ta_sub$protein_max, -ta_sub$detect_fraction,
+                         -ta_sub$rna_rank_max), ]
+  ta_sub <- ta_sub[!duplicated(toupper(ta_sub$gene_symbol)), ]
+  
+  idx <- match(toupper(gene_symbols), toupper(ta_sub$gene_symbol))
+  data.frame(
+    gene_symbol = gene_symbols,
+    primary_tissue = ta_sub$ts_tissue[idx],
+    stringsAsFactors = FALSE
+  )
 }
 
 
@@ -389,25 +426,26 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
 
 #' @keywords internal
 #' @noRd
-.biofluid_note <- function(df) {
-  n <- nrow(df)
+.biofluid_note <- function(atlas_df) {
+  n <- nrow(atlas_df)
   if (n == 0L) return(character(0))
+  
   vapply(seq_len(n), function(i) {
-    row <- df[i, ]
-    has_loc <- any(!is.na(row[intersect(.LOC_COLS, names(row))]))
-    if (!has_loc) return(NA_character_)
-
-    is_sec  <- isTRUE(row$is_secreted == 1)
-    is_mem  <- isTRUE(row$is_membrane == 1)
-    is_nuc  <- isTRUE(row$is_nuclear == 1)
+    row <- atlas_df[i, ]
+    if (is.na(row$found) || !row$found) return(NA_character_)
+    
+    is_sec <- isTRUE(row$is_secreted == 1)
+    is_mem <- isTRUE(row$is_membrane == 1)
+    is_nuc <- isTRUE(row$is_nuclear == 1)
     is_cyto <- isTRUE(row$is_cytoplasmic == 1)
     is_mito <- isTRUE(row$is_mitochondrial == 1)
-    is_proj <- isTRUE(row$is_projection == 1)
+    is_proj <- "is_projection" %in% names(row) &&
+      isTRUE(row$is_projection == 1)
     conf    <- row$protein_confidence
-
+    
     if (is_sec)  return("Expected in biofluids (secreted)")
-    if (is_mem)  return("May appear via shedding or exosomes")
-    if (is_proj) return("May appear via damage-release (axonal or dendritic injury)")
+    if (is_mem)  return("May appear via shedding/exosomes")
+    if (is_proj) return("May appear via damage-release (axonal/dendritic injury)")
     if ((is_nuc || is_cyto) && !is.na(conf) && conf > 0.7)
       return("Biofluid elevation suggests tissue damage")
     if (is_mito && !is.na(conf) && conf > 0.7)
@@ -418,61 +456,264 @@ triage <- function(genes, sample_type, context_tissue = NULL) {
 
 
 # =============================================================================
-# protein_tissues from the union gate, and the prose reason
+# Per-gene verdict logic
 # =============================================================================
 
-#' Tissues where the protein is detected, from the union gate. Populated for
-#' any detected gene, including those outside the concordance atlas.
+#' Triage logic for a single gene (target-only, tissue-aware)
+#'
 #' @keywords internal
 #' @noRd
-.protein_tissues_from_gate <- function(gene_symbols, hpa) {
-  sub <- hpa[toupper(hpa$gene_symbol) %in% toupper(gene_symbols) &
-               hpa$any_detected %in% TRUE, , drop = FALSE]
-  if (nrow(sub) == 0L) return(rep(NA_character_, length(gene_symbols)))
-  ag <- tapply(sub$tissue, toupper(sub$gene_symbol),
-               function(x) paste(sort(unique(x)), collapse = ", "))
-  unname(ag[match(toupper(gene_symbols), names(ag))])
+.triage_target <- function(gc, lp, rescued, atlas_blind,
+                           tissue_verdict, tissue_best_class,
+                           cross_platform_agree, protein_evidence,
+                           primary_tissue, specificity_class,
+                           effective_tissue_names, is_systemic, is_biofluid)  {
+  
+  # Helper: describe why the tissue gate failed
+  tissue_failure_text <- function() {
+    where <- if (nzchar(effective_tissue_names))
+      paste0(" in ", effective_tissue_names) else ""
+    
+    if (is.na(tissue_best_class)) {
+      return(paste0("Gene absent from tissue atlas", where, "."))
+    }
+    
+    # Add primary tissue info when available and informative
+    primary_note <- ""
+    if (!is.na(primary_tissue) && !is.na(specificity_class) &&
+        specificity_class %in% c("tissue_specific", "tissue_enriched")) {
+      primary_note <- paste0(" Primary expression tissue: ", primary_tissue, ".")
+    }
+    
+    msg <- switch(as.character(tissue_best_class),
+                  "low_expression" = paste0("Gene not expressed", where,
+                                                   " (no RNA, no protein detected)."),
+                  "suppressed_in_tissue" = paste0("Gene transcribed but not translated",
+                                                   where, " (RNA present, no protein",
+                                                   " detected)."),
+                  "variable_in_tissue" = paste0("Trace RNA in some cell types but",
+                                                   " no protein detected", where, "."),
+                  paste0("Gene not detected at protein level", where, ".")
+    )
+    paste0(msg, primary_note)
+  }
+  
+  # Not in atlas
+  if (is.na(gc))
+    return(list(verdict = NA_character_, reason = "Gene not in atlas."))
+  
+  # --- Gate 1: compartment plausibility ---
+  if (!is.na(lp) && !lp) {
+    r <- "Subcellular localisation inconsistent with sample compartment."
+    extras <- character(0)
+    if (gc == "consistently_suppressed")
+      extras <- c(extras, "Also suppressed class; RNA evidence unreliable.")
+    if (!is.na(tissue_verdict) && tissue_verdict == "detected_ubiquitous")
+      extras <- c(extras, "Also broadly expressed; tissue-of-origin unsupported.")
+    if (!is.na(tissue_verdict) && tissue_verdict == "not_detected")
+      extras <- c(extras, paste("Also:", tolower(tissue_failure_text())))
+    return(list(
+      verdict = "compartment_implausible",
+      reason  = paste(c(r, extras), collapse = " ")
+    ))
+  }
+  
+  # --- Gate 2: tissue (presence + specificity) ---
+  if (!is.na(tissue_verdict) && tissue_verdict == "not_detected") {
+    r <- tissue_failure_text()
+    extras <- character(0)
+    if (gc == "consistently_suppressed")
+      extras <- c(extras, "Also suppressed class; RNA evidence unreliable.")
+    return(list(
+      verdict = "tissue_origin_mismatch",
+      reason  = paste(c(r, extras), collapse = " ")
+    ))
+  }
+  is_broad <- !is.na(tissue_verdict) && tissue_verdict == "detected_ubiquitous"
+  
+  # Transparency note for rescued compartment gate
+  rescue_note <- if (isTRUE(rescued))
+    paste("Compartment gate rescued: projection-localised protein in",
+          "biofluid (atlas microscopy under-detects axonal/dendritic",
+          "compartments). Verdict reflects concordance and tissue gates only.")
+  else
+    NULL
+  
+  # --- Gate 3: concordance class ---
+  if (gc == "consistently_suppressed") {
+    if (isTRUE(atlas_blind)) {
+      return(list(
+        verdict = "RNA-supported",
+        reason  = paste(c(rescue_note,
+                          "Suppressed concordance call is an atlas artifact:",
+                          "cellular proteomics under-detects secreted and",
+                          "projection proteins that have left the cell of",
+                          "origin. RNA-protein concordance cannot be",
+                          "evaluated from this atlas for this gene in",
+                          "biofluid context."),
+                        collapse = " ")
+      ))
+    }
+    
+    # Cross-platform check (tissue-filtered): GTEx disagrees AND
+    # multiple platforms detect protein in the relevant tissue
+    if (!is.na(cross_platform_agree) && cross_platform_agree < 0.3 &&
+        !is.na(protein_evidence) && protein_evidence >= 2) {
+      return(list(
+        verdict = "caution",
+        reason  = paste(c(rescue_note,
+                          "Classified as suppressed by HPA IHC, but GTEx MS",
+                          "does not confirm suppression in relevant tissue(s)",
+                          "and protein is detected by multiple platforms.",
+                          "IHC may undercount this protein;",
+                          "interpret RNA-protein discordance with caution."),
+                        collapse = " ")
+      ))
+    }
+    
+    return(list(
+      verdict = "RNA-unreliable",
+      reason  = paste(c(rescue_note,
+                        "Suppressed. RNA does not predict protein.",
+                        "RNA-based target evidence is not defensible;",
+                        "protein-level evidence required.",
+                        if (!is.na(cross_platform_agree) && cross_platform_agree > 0.7)
+                          "Cross-platform agreement confirms suppression."
+                        else NULL),
+                      collapse = " ")
+    ))
+  }
+  
+  if (gc == "variable") {
+    r <- "Variable concordance; RNA-protein relationship is tissue-dependent."
+    if (is_broad)
+      r <- paste(r, "Additionally broadly expressed; tissue-of-origin unsupported.")
+    return(list(
+      verdict = "caution",
+      reason  = paste(c(rescue_note, r), collapse = " ")
+    ))
+  }
+  
+  if (gc == "low_expression") {
+    # Check if multi-platform evidence contradicts the HPA low-expression
+    # call in relevant tissues
+    if (!is.na(protein_evidence) && protein_evidence >= 2) {
+      return(list(
+        verdict = "caution",
+        reason  = paste(c(rescue_note,
+                          "Low expression in HPA cell-type atlas, but protein",
+                          "detected by multiple platforms in relevant tissue(s).",
+                          "HPA classification may reflect coverage gap."),
+                        collapse = " ")
+      ))
+    }
+    return(list(
+      verdict = "caution",
+      reason  = paste(c(rescue_note,
+                        "Low expression class-sparse atlas data;",
+                        "insufficient evidence."),
+                      collapse = " ")
+    ))
+  }
+  
+  # --- Gate 4: tissue specificity ---
+  if (gc == "consistently_concordant") {
+    if (is_broad) {
+      broad_reason <- if (is_biofluid)
+        paste("Concordant and compartment-plausible, but broadly expressed.",
+              "Biofluid detection likely reflects systemic sources",
+              "rather than tissue-specific origin.")
+      else
+        paste("Concordant and compartment-plausible, but broadly expressed",
+              "across tissues. Tissue-of-origin claims unsupported.")
+      return(list(
+        verdict = "RNA-supported_but_broad",
+        reason  = paste(c(rescue_note, broad_reason), collapse = " ")
+      ))
+    }
+    if (!is.na(tissue_verdict) && tissue_verdict == "detected_concordant_broad") {
+      return(list(
+        verdict = "RNA-supported",
+        reason  = paste(c(rescue_note,
+                          "Broadly expressed across tissues but concordant",
+                          "at protein level in", effective_tissue_names,
+                          "-- direct tissue evidence supports the claim."),
+                        collapse = " ")
+      ))
+    }
+    return(list(
+      verdict = "RNA-supported",
+      reason  = paste(c(rescue_note,
+                        "Concordant and compartment-plausible.",
+                        "RNA-based target evidence is defensible."),
+                      collapse = " ")
+    ))
+  }
+  
+  # Fallback
+  list(verdict = "caution",
+       reason  = paste(c(rescue_note, "Unrecognised gene class."),
+                       collapse = " "))
 }
 
 
-#' Build a short, axis-consistent reason string. Biofluid plausibility is the
-#' raw localisation call; the rescue is reported as its own clause.
+#' Check whether genes have IHC protein detection in any target tissue
+#'
+#' For secreted proteins, bulk tissue MS/PaxDB cannot distinguish
+#' genuine tissue expression from blood contamination. Only cell-type
+#' resolved IHC (detect_fraction > 0) confirms the protein is
+#' produced locally.
+#'
 #' @keywords internal
 #' @noRd
-.reason_from_axes <- function(concordance, plausibility, rescue, tissue,
-                              specificity, supp_rescued, where) {
-  conc <- c(
-    concordant     = "RNA-protein concordant",
-    variable       = "variable concordance",
-    suppressed     = "suppressed, RNA does not predict protein",
-    low_expression = "low expression",
-    not_in_atlas   = "concordance not assessable, gene outside the atlas"
-  )[concordance]
-  plaus <- c(
-    plausible   = "localisation plausible for the biofluid",
-    implausible = "localisation inconsistent with the biofluid",
-    no_data     = "no localisation data"
-  )[plausibility]
-  tis <- c(
-    detected           = paste0("protein detected", where),
-    detected_1platform = paste0("protein detected", where, " by one platform only"),
-    discordant         = paste0("platforms disagree on protein presence", where),
-    mismatch           = paste0("protein not detected", where, ", platforms agree on absence"),
-    coverage_limited   = paste0("protein presence", where, " not assessable, thin coverage"),
-    not_in_panel       = paste0("gene absent from the protein panel", where),
-    systemic_na        = "systemic sample, no tissue-of-origin gate"
-  )[tissue]
-  spec <- c(
-    specific = "tissue-specific at protein level",
-    broad    = "broadly expressed at protein level",
-    na       = "protein breadth unknown"
-  )[specificity]
+.check_ihc_in_tissues <- function(gene_symbols, tissue_atlas, tissues) {
+  ta_sub <- tissue_atlas[tissue_atlas$ts_tissue %in% tissues &
+                           toupper(tissue_atlas$gene_symbol) %in% toupper(gene_symbols), ,
+                         drop = FALSE]
+  
+  if (nrow(ta_sub) == 0L) return(rep(FALSE, length(gene_symbols)))
+  
+  key <- toupper(ta_sub$gene_symbol)
+  any_ihc <- tapply(ta_sub$detect_fraction > 0, key, any, na.rm = TRUE)
+  
+  idx <- match(toupper(gene_symbols), names(any_ihc))
+  result <- any_ihc[idx]
+  result[is.na(result)] <- FALSE
+  as.logical(result)
+}
 
-  base <- paste(conc, plaus, tis, spec, sep = "; ")
-  base <- ifelse(rescue %in% TRUE,
-                 paste0(base, "; rescued, projection or secreted protein in biofluid"),
-                 base)
-  ifelse(supp_rescued %in% TRUE,
-         paste0(base, "; suppression not corroborated cross-platform."),
-         paste0(base, "."))
+
+#' Compute protein-level tissue breadth for genes
+#'
+#' Fraction of atlas tissues where protein is detected by any platform
+#' (IHC detect_fraction > 0, GTEx MS, or PaxDb). Used to override
+#' RNA-based tau when protein and RNA breadth diverge.
+#'
+#' @keywords internal
+#' @noRd
+.protein_tissue_breadth <- function(gene_symbols, tissue_atlas) {
+  n_total <- length(unique(tissue_atlas$ts_tissue))
+  ta_sub <- tissue_atlas[toupper(tissue_atlas$gene_symbol) %in%
+                           toupper(gene_symbols), , drop = FALSE]
+  
+  if (nrow(ta_sub) == 0L) {
+    return(data.frame(gene_symbol = gene_symbols,
+                      protein_breadth = NA_real_,
+                      stringsAsFactors = FALSE))
+  }
+  
+  ihc <- !is.na(ta_sub$detect_fraction) & ta_sub$detect_fraction > 0
+  ms  <- if ("ms_detected" %in% names(ta_sub))
+    !is.na(ta_sub$ms_detected) & ta_sub$ms_detected else rep(FALSE, nrow(ta_sub))
+  pax <- if ("paxdb_detected" %in% names(ta_sub))
+    !is.na(ta_sub$paxdb_detected) & ta_sub$paxdb_detected else rep(FALSE, nrow(ta_sub))
+  
+  ta_sub$any_det <- ihc | ms | pax
+  key <- toupper(ta_sub$gene_symbol)
+  n_det <- tapply(ta_sub$any_det, key, sum, na.rm = TRUE)
+  
+  idx <- match(toupper(gene_symbols), names(n_det))
+  data.frame(gene_symbol = gene_symbols,
+             protein_breadth = as.numeric(n_det[idx]) / n_total,
+             stringsAsFactors = FALSE)
 }

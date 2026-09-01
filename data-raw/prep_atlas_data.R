@@ -1,24 +1,6 @@
 # =============================================================================
 # prep_atlas_data.R
 # Assembles the concordR internal datasets from the existing pipeline outputs.
-#
-# Run once, then: usethis::use_data(..., internal = TRUE)
-#
-# Three objects, non-overlapping jobs:
-#   concordance_atlas  gene-level, concordance gate only (gene_class etc.)
-#   tissue_atlas       gene x tissue, concordance-gate machinery only
-#   hpa_tissue         gene x tissue, three-source UNION (HPA + GTEx + PaxDb),
-#                      the tissue gate source plus primary_tissue/breadth
-#   localisation_flags single UniProt localisation source for the compartment gate
-#
-# CHANGES vs the previous build:
-#   - removed is_* / gene_feat from the gene atlas (localisation is one source)
-#   - removed tau and specificity_class (RNA signal, superseded by protein breadth)
-#   - removed the unused gtex_gene_summary join on the gene atlas
-#   - dropped the unused gtex_medians join on tissue_atlas
-#   - widened the GTEx/PaxDb -> HPA tissue maps in the hpa_tissue block
-#   - folded the three-source presence vote into hpa_tissue (no separate object)
-#   - load + validate localisation_flags, assert atlas coverage
 # =============================================================================
 
 library(data.table)
@@ -27,12 +9,13 @@ library(dplyr)
 library(tidyr)
 
 # ---- Paths -----------------------------------------------------------------
+# These are all outputs from companion paper on rna to protein concordance
 PROJECT_ROOT  <- "D:/Bioinformatics_projects/hpa_to_tabula"
-ATLAS_CSV     <- file.path(PROJECT_ROOT, "results/ml/gene_discordance_profiles.csv")
-TIER_CSV      <- file.path(PROJECT_ROOT, "results/tables/three_way_decomposition.csv")
-PARQUET_DIR   <- file.path(PROJECT_ROOT, "results/ml")
+ATLAS_CSV <- file.path(PROJECT_ROOT, "results/ml/gene_discordance_profiles.csv")
+TIER_CSV  <- file.path(PROJECT_ROOT, "results/tables/three_way_decomposition.csv")
+PARQUET_DIR <- file.path(PROJECT_ROOT, "results/ml")
 EXTERNAL_DIR  <- file.path(PROJECT_ROOT, "external_data")
-LOC_CSV       <- "D:/Bioinformatics_projects/localisation_uniprot.csv"
+LOC_CSV <- "D:/Bioinformatics_projects/localisation_uniprot.csv"
 
 parquet_candidates <- list.files(
   PARQUET_DIR,
@@ -66,7 +49,7 @@ cat("Atlas rows after dedup:", nrow(atlas), "\n")
 
 # ---- 2. Load parquet -------------------------------------------------------
 df_raw <- as.data.frame(arrow::read_parquet(PARQUET_PATH))
-df     <- as.data.table(df_raw)
+df <- as.data.table(df_raw)
 rm(df_raw)
 cat("Parquet rows:", nrow(df), " cols:", ncol(df), "\n")
 stopifnot("data.table" %in% class(df))
@@ -93,17 +76,17 @@ if (file.exists(TIER_CSV)) {
 
 # ---- 5. Gene x tissue collapsed (concordance-gate machinery) ----------------
 tissue_atlas <- df[, list(
-  rna_rank_max         = max(rna_rank,     na.rm = TRUE),
-  rna_mean_tissue      = mean(rna_mean,    na.rm = TRUE),
-  detect_fraction      = mean(y_bin,       na.rm = TRUE),
-  protein_max          = max(protein_score, na.rm = TRUE),
-  n_cell_types         = uniqueN(ts_cell_type),
-  is_brain             = max(is_brain,     na.rm = TRUE)
+  rna_rank_max = max(rna_rank,     na.rm = TRUE),
+  rna_mean_tissue = mean(rna_mean,    na.rm = TRUE),
+  detect_fraction = mean(y_bin,       na.rm = TRUE),
+  protein_max = max(protein_score, na.rm = TRUE),
+  n_cell_types = uniqueN(ts_cell_type),
+  is_brain = max(is_brain,     na.rm = TRUE)
 ), by = list(gene_symbol, ensembl_id, ts_tissue)]
 
 tissue_atlas[, tissue_class := data.table::fcase(
   rna_mean_tissue == 0 & detect_fraction == 0,            "low_expression",
-  rna_rank_max <  0.20 & detect_fraction <  0.10,         "low_expression",
+  rna_rank_max < 0.20 & detect_fraction < 0.10,         "low_expression",
   rna_rank_max >= 0.50 & detect_fraction >= 0.50,         "concordant_in_tissue",
   rna_rank_max >= 0.50 & detect_fraction <  0.20,         "suppressed_in_tissue",
   default = "variable_in_tissue"
@@ -113,7 +96,6 @@ cat("tissue_atlas: ", nrow(tissue_atlas), " (gene, tissue) rows\n", sep = "")
 print(table(tissue_atlas$tissue_class, useNA = "ifany"))
 
 # ---- 6. Merge gene-level annotations ---------------------------------------
-# (gene_feat and tau merges removed; only n_tissues remains)
 concordance_atlas <- atlas
 if ("n_tissues" %in% names(concordance_atlas))
   concordance_atlas[["n_tissues"]] <- NULL
@@ -128,7 +110,7 @@ preferred_order <- c(
   "mechanism_tier"
 )
 preferred_order <- intersect(preferred_order, names(concordance_atlas))
-remaining       <- setdiff(names(concordance_atlas), preferred_order)
+remaining  <- setdiff(names(concordance_atlas), preferred_order)
 setcolorder(concordance_atlas, c(preferred_order, remaining))
 concordance_atlas <- as.data.frame(concordance_atlas)
 
@@ -146,17 +128,17 @@ print(table(concordance_atlas$gene_class, useNA = "ifany"))
 
 PAXDB_TISSUE_MAP <- list(
   "cerebral-cortex" = "Cerebral cortex",
-  "heart"           = "Heart",
-  "kidney"          = "Kidney",
-  "liver"           = "Liver",
-  "lung"            = "Lung",
-  "lymph_node"      = "Lymph Node",
-  "pancreas"        = "Pancreas",
-  "skin"            = "Skin",
-  "spleen"          = "Spleen",
-  "stomach"         = "Stomach",
-  "testis"          = "Testis",
-  "colon"           = "Colon"     # requires external_data/paxdb/colon.txt; drop if absent
+  "heart" = "Heart",
+  "kidney" = "Kidney",
+  "liver" = "Liver",
+  "lung" = "Lung",
+  "lymph_node" = "Lymph Node",
+  "pancreas" = "Pancreas",
+  "skin" = "Skin",
+  "spleen" = "Spleen",
+  "stomach" = "Stomach",
+  "testis" = "Testis",
+  "colon" = "Colon" 
 )
 
 PAXDB_DIR <- file.path(EXTERNAL_DIR, "paxdb")
@@ -184,9 +166,9 @@ ensp_map <- ensp_map[!duplicated(ensp_map$ensp), ]
 paxdb <- paxdb_raw %>%
   inner_join(ensp_map[, c("ensp", "ensembl_id")], by = "ensp") %>%
   group_by(ensembl_id, ts_tissue) %>%
-  summarise(abundance  = max(abundance, na.rm = TRUE),
+  summarise(abundance = max(abundance, na.rm = TRUE),
             paxdb_ensp = paste(unique(ensp), collapse = ";"),
-            .groups    = "drop")
+            .groups = "drop")
 
 n_atlas_with_paxdb <- sum(unique(tissue_atlas$ensembl_id) %in% paxdb$ensembl_id)
 cat(sprintf("PaxDb: %d (gene, tissue) rows, %d atlas genes covered\n",
@@ -198,23 +180,23 @@ cat(sprintf("PaxDb: %d (gene, tissue) rows, %d atlas genes covered\n",
 # Cerebellum and SunExpo skin that the old list dropped.
 GTEX_TO_ATLAS <- c(
   "Brain.Cerebellum" = "Cerebellum",
-  "Brain.Cortex"     = "Cerebral cortex",
-  "Heart.Atrial"     = "Heart",
-  "Heart.Ventricle"  = "Heart",
-  "Breast"           = "Mammary",
-  "Liver"            = "Liver",
-  "Lung"             = "Lung",
-  "Minor.Salivary"   = "Salivary Gland",
-  "Muscle.Skeletal"  = "Muscle",
-  "Pancreas"         = "Pancreas",
-  "Prostate"         = "Prostate",
-  "Skin.Unexpo"      = "Skin",
-  "Skin.SunExpo"     = "Skin",
-  "Small.Intestine"  = "Small Intestine",
-  "Spleen"           = "Spleen",
-  "Stomach"          = "Stomach",
-  "Testis"           = "Testis",
-  "Uterus"           = "Uterus"
+  "Brain.Cortex" = "Cerebral cortex",
+  "Heart.Atrial" = "Heart",
+  "Heart.Ventricle" = "Heart",
+  "Breast" = "Mammary",
+  "Liver" = "Liver",
+  "Lung" = "Lung",
+  "Minor.Salivary" = "Salivary Gland",
+  "Muscle.Skeletal" = "Muscle",
+  "Pancreas" = "Pancreas",
+  "Prostate" = "Prostate",
+  "Skin.Unexpo" = "Skin",
+  "Skin.SunExpo" = "Skin",
+  "Small.Intestine" = "Small Intestine",
+  "Spleen" = "Spleen",
+  "Stomach" = "Stomach",
+  "Testis" = "Testis",
+  "Uterus" = "Uterus"
 )
 
 gtex_ts <- read.csv(file.path(EXTERNAL_DIR, "gtex_protein_ts_score.csv")) %>%
@@ -222,7 +204,7 @@ gtex_ts <- read.csv(file.path(EXTERNAL_DIR, "gtex_protein_ts_score.csv")) %>%
   tidyr::pivot_longer(-ensembl_id, names_to = "gtex_col", values_to = "raw") %>%
   mutate(
     ts_protein_gtex = as.numeric(sapply(strsplit(raw, ";", fixed = TRUE), `[`, 1)),
-    flag      = sapply(strsplit(raw, ";", fixed = TRUE), `[`, 2),
+    flag = sapply(strsplit(raw, ";", fixed = TRUE), `[`, 2),
     ts_tissue = GTEX_TO_ATLAS[gtex_col]
   ) %>%
   filter(is.na(flag) | flag != "NA_one_rep_in_raw") %>%
@@ -234,7 +216,7 @@ gtex_rna_ts <- read.csv(file.path(EXTERNAL_DIR, "gtex_rna_ts_score.csv")) %>%
   tidyr::pivot_longer(-ensembl_id, names_to = "gtex_col", values_to = "raw") %>%
   mutate(
     ts_rna_gtex = as.numeric(sapply(strsplit(raw, "[; ]"), `[`, 1)),
-    flag      = sapply(strsplit(raw, "[; ]"), `[`, 2),
+    flag = sapply(strsplit(raw, "[; ]"), `[`, 2),
     ts_tissue = GTEX_TO_ATLAS[gtex_col]
   ) %>%
   filter(is.na(flag) | !flag %in% c("NA_raw_tpm_less_1", "all_tissues_tpm_less_1")) %>%
@@ -250,40 +232,40 @@ gtex_medians_raw <- read.csv(file.path(EXTERNAL_DIR, "gtex_protein_tissue_median
 # tissue_atlas: augment with direction (concordance-gate machinery only)
 # ===========================================================================
 tissue_atlas <- tissue_atlas %>%
-  left_join(gtex_ts,     by = c("ensembl_id", "ts_tissue")) %>%
+  left_join(gtex_ts, by = c("ensembl_id", "ts_tissue")) %>%
   left_join(gtex_rna_ts, by = c("ensembl_id", "ts_tissue")) %>%
-  left_join(paxdb,       by = c("ensembl_id", "ts_tissue")) %>%
+  left_join(paxdb, by = c("ensembl_id", "ts_tissue")) %>%
   mutate(
-    ms_detected    = !is.na(ts_protein_gtex),
+    ms_detected = !is.na(ts_protein_gtex),
     paxdb_detected = !is.na(abundance),
-    ihc_detected   = protein_max >= 1,
+    ihc_detected = protein_max >= 1,
     protein_evidence_sources = ms_detected + paxdb_detected + ihc_detected,
     gtex_concordance = case_when(
       is.na(ts_rna_gtex) | is.na(ts_protein_gtex) ~ NA_character_,
-      ts_rna_gtex > 0 & ts_protein_gtex > 0       ~ "gtex_concordant",
-      ts_rna_gtex > 0 & ts_protein_gtex <= 0      ~ "gtex_suppressed",
-      ts_rna_gtex <= 0 & ts_protein_gtex > 0      ~ "gtex_stabilised",
-      TRUE                                         ~ "gtex_low_both"
+      ts_rna_gtex > 0 & ts_protein_gtex > 0  ~ "gtex_concordant",
+      ts_rna_gtex > 0 & ts_protein_gtex <= 0 ~ "gtex_suppressed",
+      ts_rna_gtex <= 0 & ts_protein_gtex > 0 ~ "gtex_stabilised",
+      TRUE ~ "gtex_low_both"
     ),
     platforms_agree = case_when(
       is.na(gtex_concordance) ~ NA,
       tissue_class == "suppressed_in_tissue" &
-        gtex_concordance == "gtex_suppressed"       ~ TRUE,
+        gtex_concordance == "gtex_suppressed"  ~ TRUE,
       tissue_class == "concordant_in_tissue" &
-        gtex_concordance == "gtex_concordant"        ~ TRUE,
+        gtex_concordance == "gtex_concordant" ~ TRUE,
       tissue_class %in% c("suppressed_in_tissue", "concordant_in_tissue") ~ FALSE,
-      TRUE                                           ~ NA
+      TRUE ~ NA
     )
   )
 
 # ===========================================================================
-# Tissue gate: three-source UNION presence vote   (object name: hpa_tissue)
+# Tissue gate: three-source union presence vote   (object name: hpa_tissue)
 # ===========================================================================
 # Built over the union of HPA, GTEx, and PaxDb: every gene any source sees,
 # across every tissue any source covers. Genes HPA never stained still carry
 # GTEx and PaxDb evidence, which is the whole point of decoupling. The object
 # keeps the name hpa_tissue so load_atlas() and triage() need no change; the
-# ihc_* columns are simply NA for genes outside the HPA panel.
+# ihc_* columns are  NA for genes outside the HPA panel.
 HPA_IHC_PATH <- file.path(EXTERNAL_DIR, "normal_ihc_data.tsv")
 stopifnot(file.exists(HPA_IHC_PATH))
 
@@ -299,10 +281,10 @@ hpa_raw[, level_num := fcase(
 # HPA IHC summary per (gene, tissue). hpa_call is present for every HPA pair.
 hpa_ihc <- hpa_raw[,
   list(
-    ihc_max_level    = max(level_num, na.rm = TRUE),
-    ihc_detected     = any(level_num > 0, na.rm = TRUE),
+    ihc_max_level = max(level_num, na.rm = TRUE),
+    ihc_detected = any(level_num > 0, na.rm = TRUE),
     ihc_n_cell_types = .N,
-    ihc_n_detected   = sum(level_num > 0, na.rm = TRUE)
+    ihc_n_detected = sum(level_num > 0, na.rm = TRUE)
   ),
   by = list(ensembl_id, gene_symbol, tissue)
 ]
@@ -316,19 +298,19 @@ cat("HPA IHC:", length(unique(hpa_ihc$ensembl_id)), "genes,",
 
 # --- GTEx presence in HPA tissue names (in-universe absence votes) ----------
 GTEX_TO_HPA <- c(
-  "Adrenal.Gland"    = "Adrenal gland",  "Brain.Cerebellum" = "Cerebellum",
-  "Brain.Cortex"     = "Cerebral cortex","Breast"           = "Breast",
-  "Colon.Sigmoid"    = "Colon",          "Colon.Transverse" = "Colon",
-  "Esophagus.Mucosa" = "Esophagus",      "Esophagus.Muscle" = "Esophagus",
-  "Heart.Atrial"     = "Heart muscle",   "Heart.Ventricle"  = "Heart muscle",
-  "Liver"            = "Liver",          "Lung"             = "Lung",
-  "Minor.Salivary"   = "Salivary gland", "Muscle.Skeletal"  = "Skeletal muscle",
-  "Ovary"            = "Ovary",          "Pancreas"         = "Pancreas",
-  "Pituitary"        = "Pituitary gland","Prostate"         = "Prostate",
-  "Skin.Unexpo"      = "Skin",           "Small.Intestine"  = "Small intestine",
-  "Spleen"           = "Spleen",         "Stomach"          = "Stomach",
-  "Testis"           = "Testis",         "Thyroid"          = "Thyroid gland",
-  "Vagina"           = "Vagina"
+  "Adrenal.Gland" = "Adrenal gland",  "Brain.Cerebellum" = "Cerebellum",
+  "Brain.Cortex" = "Cerebral cortex","Breast" = "Breast",
+  "Colon.Sigmoid" = "Colon", "Colon.Transverse" = "Colon",
+  "Esophagus.Mucosa" = "Esophagus", "Esophagus.Muscle" = "Esophagus",
+  "Heart.Atrial" = "Heart muscle", "Heart.Ventricle" = "Heart muscle",
+  "Liver" = "Liver", "Lung" = "Lung",
+  "Minor.Salivary" = "Salivary gland", "Muscle.Skeletal" = "Skeletal muscle",
+  "Ovary" = "Ovary", "Pancreas" = "Pancreas",
+  "Pituitary" = "Pituitary gland","Prostate" = "Prostate",
+  "Skin.Unexpo" = "Skin", "Small.Intestine"  = "Small intestine",
+  "Spleen" = "Spleen", "Stomach" = "Stomach",
+  "Testis" = "Testis", "Thyroid" = "Thyroid gland",
+  "Vagina" = "Vagina"
 )
 
 gtex_presence <- gtex_medians_raw %>%
@@ -351,14 +333,14 @@ gtex_presence <- gtex_medians_raw %>%
 
 # --- PaxDb presence in HPA tissue names (in-universe absence votes) ---------
 PAXDB_TO_HPA <- c(
-  "Cerebral cortex" = "Cerebral cortex", "Heart"   = "Heart muscle",
-  "Kidney"          = "Kidney",          "Liver"   = "Liver",
-  "Lung"            = "Lung",            "Lymph Node" = "Lymph node",
-  "Pancreas"        = "Pancreas",        "Skin"    = "Skin",
-  "Spleen"          = "Spleen",          "Stomach" = "Stomach",
-  "Testis"          = "Testis",          "Colon"   = "Colon"
+  "Cerebral cortex" = "Cerebral cortex", "Heart" = "Heart muscle",
+  "Kidney" = "Kidney", "Liver" = "Liver",
+  "Lung" = "Lung", "Lymph Node" = "Lymph node",
+  "Pancreas" = "Pancreas", "Skin"    = "Skin",
+  "Spleen" = "Spleen", "Stomach" = "Stomach",
+  "Testis" = "Testis", "Colon"   = "Colon"
 )
-paxdb_universe    <- unique(paxdb$ensembl_id)
+paxdb_universe <- unique(paxdb$ensembl_id)
 paxdb_hpa_tissues <- unique(unname(PAXDB_TO_HPA))
 
 paxdb_presence <- tidyr::expand_grid(ensembl_id = paxdb_universe,
@@ -383,19 +365,19 @@ hpa_tissue <- hpa_ihc %>%
   dplyr::full_join(paxdb_presence, by = c("ensembl_id", "tissue")) %>%
   mutate(
     n_detected = is_det(hpa_call) + is_det(gtex_call) + is_det(paxdb_call),
-    n_absent   = is_abs(hpa_call) + is_abs(gtex_call) + is_abs(paxdb_call),
-    n_voters   = n_detected + n_absent,
-    seen_by    = sub(";$", "", paste0(
+    n_absent = is_abs(hpa_call) + is_abs(gtex_call) + is_abs(paxdb_call),
+    n_voters = n_detected + n_absent,
+    seen_by = sub(";$", "", paste0(
       ifelse(is_det(hpa_call),   "HPA;",   ""),
       ifelse(is_det(gtex_call),  "GTEx;",  ""),
       ifelse(is_det(paxdb_call), "PaxDb;", ""))),
     verdict = case_when(
       n_voters < 2L & n_detected == 1L ~ "detected_by_one",
-      n_voters < 2L                    ~ "insufficient_coverage",
-      n_detected > 0 & n_absent == 0   ~ "detected",
+      n_voters < 2L ~ "insufficient_coverage",
+      n_detected > 0 & n_absent == 0 ~ "detected",
       n_absent   > 0 & n_detected == 0 ~ "concordant_absent",
-      TRUE                             ~ "discordant"),
-    any_detected       = n_detected > 0,
+      TRUE ~ "discordant"),
+    any_detected = n_detected > 0,
     confident_detected = (!is.na(ihc_max_level) & ihc_max_level >= 2L) |
                           (n_detected >= 2)
   )
@@ -414,37 +396,37 @@ hpa_tissue$gene_symbol[need] <-
   sym_sources$gene_symbol[match(hpa_tissue$ensembl_id[need], sym_sources$ensembl_id)]
 
 cat("\n==== tissue gate (three-source union) ====\n")
-cat("  genes:          ", length(unique(hpa_tissue$ensembl_id)), "\n")
-cat("  tissues:        ", length(unique(hpa_tissue$tissue)), "\n")
-cat("  rows:           ", nrow(hpa_tissue), "\n")
-cat("  rows w/ symbol: ", sum(!is.na(hpa_tissue$gene_symbol)), "\n")
+cat("genes:          ", length(unique(hpa_tissue$ensembl_id)), "\n")
+cat("tissues:        ", length(unique(hpa_tissue$tissue)), "\n")
+cat("rows:           ", nrow(hpa_tissue), "\n")
+cat("rows w/ symbol: ", sum(!is.na(hpa_tissue$gene_symbol)), "\n")
 print(table(hpa_tissue$verdict, useNA = "ifany"))
 
 # ===========================================================================
 # Gene-level tissue summaries (protein_tissues from HPA, rna_tissues from atlas)
 # ===========================================================================
 protein_tissue_summary <- as.data.table(hpa_tissue)[any_detected == TRUE,
-  list(protein_tissues   = paste(sort(unique(tissue)), collapse = ", "),
+  list(protein_tissues = paste(sort(unique(tissue)), collapse = ", "),
        n_tissues_protein = uniqueN(tissue)),
   by = gene_symbol]
 protein_tissue_summary <- as.data.frame(protein_tissue_summary)
 
 rna_tissue_summary <- as.data.table(tissue_atlas)[rna_rank_max >= 0.5,
-  list(rna_tissues   = paste(sort(unique(ts_tissue)), collapse = ", "),
+  list(rna_tissues = paste(sort(unique(ts_tissue)), collapse = ", "),
        n_tissues_rna = uniqueN(ts_tissue)),
   by = gene_symbol]
 rna_tissue_summary <- as.data.frame(rna_tissue_summary)
 
 concordance_atlas <- concordance_atlas %>%
   left_join(protein_tissue_summary, by = "gene_symbol") %>%
-  left_join(rna_tissue_summary,     by = "gene_symbol")
+  left_join(rna_tissue_summary, by = "gene_symbol")
 
 # ===========================================================================
 # localisation_flags: single UniProt source for the compartment gate
 # ===========================================================================
 localisation_flags <- read.csv(LOC_CSV, stringsAsFactors = FALSE)
 
-# Source spells the id column ensemble_id; normalise.
+# Source spells the id column ensemble_id. Probably my own typo from earlier
 names(localisation_flags)[names(localisation_flags) == "ensemble_id"] <- "ensembl_id"
 
 loc_required <- c("ensembl_id", "gene_symbol",
@@ -474,16 +456,16 @@ if (length(atlas_no_loc) > 0)
 # ===========================================================================
 # Save
 # ===========================================================================
-concordance_atlas  <- as.data.frame(concordance_atlas)
-tissue_atlas       <- as.data.frame(tissue_atlas)
-hpa_tissue         <- as.data.frame(hpa_tissue)
+concordance_atlas <- as.data.frame(concordance_atlas)
+tissue_atlas <- as.data.frame(tissue_atlas)
+hpa_tissue <- as.data.frame(hpa_tissue)
 localisation_flags <- as.data.frame(localisation_flags)
 
 cat("\n==== Final dimensions ====\n")
-cat("  concordance_atlas: ", nrow(concordance_atlas), "x", ncol(concordance_atlas), "\n")
-cat("  tissue_atlas:      ", nrow(tissue_atlas), "x", ncol(tissue_atlas), "\n")
-cat("  hpa_tissue:        ", nrow(hpa_tissue), "x", ncol(hpa_tissue), "\n")
-cat("  localisation_flags:", nrow(localisation_flags), "x", ncol(localisation_flags), "\n")
+cat("concordance_atlas: ", nrow(concordance_atlas), "x", ncol(concordance_atlas), "\n")
+cat("tissue_atlas:      ", nrow(tissue_atlas), "x", ncol(tissue_atlas), "\n")
+cat("hpa_tissue:        ", nrow(hpa_tissue), "x", ncol(hpa_tissue), "\n")
+cat("localisation_flags:", nrow(localisation_flags), "x", ncol(localisation_flags), "\n")
 
 usethis::use_data(concordance_atlas, tissue_atlas, hpa_tissue, localisation_flags,
                   internal = TRUE, overwrite = TRUE)

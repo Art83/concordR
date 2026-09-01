@@ -11,10 +11,10 @@
 #' @keywords internal
 #' @noRd
 .PLAUSIBLE_FLAGS <- list(
-  plasma                 = c("is_secreted", "is_membrane"),
-  serum                  = c("is_secreted", "is_membrane"),
-  csf                    = c("is_secreted", "is_membrane"),
-  urine                  = c("is_secreted", "is_membrane"),
+  plasma = c("is_secreted", "is_membrane"),
+  serum  = c("is_secreted", "is_membrane"),
+  csf = c("is_secreted", "is_membrane"),
+  urine = c("is_secreted", "is_membrane"),
   cell_lysate            = NULL,
   tissue                 = NULL,
   nuclear_fraction       = c("is_nuclear"),
@@ -27,15 +27,15 @@
 #' @keywords internal
 #' @noRd
 .SAMPLE_TISSUE_MAP <- list(
-  plasma                 = NULL,
-  serum                  = NULL,
-  csf                    = NULL,
-  urine                  = "Kidney",
-  cell_lysate            = NULL,
-  tissue                 = NULL,
-  nuclear_fraction       = NULL,
+  plasma = NULL,
+  serum = NULL,
+  csf = NULL,
+  urine = "Kidney",
+  cell_lysate = NULL,
+  tissue = NULL,
+  nuclear_fraction = NULL,
   mitochondrial_fraction = NULL,
-  membrane_fraction      = NULL
+  membrane_fraction = NULL
 )
 
 #' Sample types where projection proteins can be released by damage and
@@ -75,7 +75,7 @@
 .RENAME_HPA_TO_ATLAS <- c(
   "heart muscle"    = "Heart",
   "skeletal muscle" = "Muscle",
-  "breast"          = "Mammary"
+  "breast" = "Mammary"
 )
 
 #' Translate HPA tissue labels to atlas (tissue_atlas) labels.
@@ -151,13 +151,13 @@
   # real implausible call) from "no localisation data" (NA, not evaluable).
   all_loc_cols <- grep("^is_", names(atlas_subset), value = TRUE)
 
-  loc_data   <- as.matrix(atlas_subset[, all_loc_cols, drop = FALSE])
+  loc_data <- as.matrix(atlas_subset[, all_loc_cols, drop = FALSE])
   plaus_data <- as.matrix(atlas_subset[, available,    drop = FALSE])
-  storage.mode(loc_data)   <- "numeric"
+  storage.mode(loc_data) <- "numeric"
   storage.mode(plaus_data) <- "numeric"
 
   has_any_positive <- rowSums(loc_data   == 1, na.rm = TRUE) > 0
-  has_plausible    <- rowSums(plaus_data == 1, na.rm = TRUE) > 0
+  has_plausible <- rowSums(plaus_data == 1, na.rm = TRUE) > 0
 
   ifelse(!has_any_positive, NA, ifelse(has_plausible, TRUE, FALSE))
 }
@@ -171,14 +171,14 @@
   if (n == 0L) return(character(0))
 
   mapping <- c(
-    is_secreted      = "Secreted",
-    is_membrane      = "Membrane",
-    is_nuclear       = "Nuclear",
-    is_cytoplasmic   = "Cytoplasmic",
+    is_secreted = "Secreted",
+    is_membrane = "Membrane",
+    is_nuclear = "Nuclear",
+    is_cytoplasmic = "Cytoplasmic",
     is_mitochondrial = "Mitochondrial",
-    is_er_golgi      = "ER/Golgi",
-    is_cytoskeleton  = "Cytoskeletal",
-    is_projection    = "Cell projection"
+    is_er_golgi = "ER/Golgi",
+    is_cytoskeleton = "Cytoskeletal",
+    is_projection = "Cell projection"
   )
   cols_to_use <- intersect(names(mapping), colnames(atlas_subset))
   if (length(cols_to_use) == 0L) return(rep(NA_character_, n))

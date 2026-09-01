@@ -109,7 +109,7 @@ test_that("triage rejects invalid context_tissue", {
 # --- Plasma (systemic, no tissue gate) ---
 
 test_that("triage skips tissue gate for plasma", {
-  # Plasma is systemic — no tissue-of-origin gate fires
+  # Plasma is systemic, no tissue-of-origin gate fires
   res <- triage("NEFL", sample_type = "plasma")
   if (!is.na(res$verdict)) {
     expect_true(res$verdict != "tissue_origin_mismatch")
@@ -133,7 +133,6 @@ test_that("triage reason column is always character", {
 
 test_that("triage rescues projection proteins in biofluid context", {
   # NEFL is a projection protein; if its raw compartment check fails,
-
   # it should be rescued in CSF/plasma
   res <- triage("NEFL", sample_type = "csf")
   if (!is.na(res$verdict)) {
