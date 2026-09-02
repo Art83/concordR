@@ -15,12 +15,16 @@
 #' (\code{R/sysdata.rda}) and require no network access.
 #'
 #' @section Atlas contents (gene-level):
-#' One row per gene (up to 11,154 genes) with columns including
-#' \code{gene_symbol}, \code{gene_class}, \code{protein_confidence},
-#' \code{detection_rate}, \code{mean_rna_rank}, \code{n_tissues},
-#' \code{mechanistic_tier}, \code{tau}, \code{specificity_class}, and
-#' the \code{is_*} subcellular localisation flags. See package
-#' documentation for full column descriptions.
+#' One row per gene (11,151 genes) with columns including
+#' \code{gene_symbol}, \code{ensembl_id}, \code{gene_class},
+#' \code{protein_confidence}, \code{detection_rate},
+#' \code{suppression_rate}, \code{mean_rna_rank}, \code{n_tissues},
+#' \code{mechanism_tier}, \code{tau} (RNA, evidence only),
+#' \code{protein_breadth} (evidence only), \code{protein_tau} (IHC panel,
+#' the specificity gate input), \code{primary_tissue_ihc},
+#' \code{n_tissues_ihc}, and \code{n_tissues_ihc_detected}. Localisation
+#' flags are not in this table; \code{\link{triage}} joins them at run time
+#' from a separate UniProt-derived object.
 #'
 #' @section Atlas contents (tissue-resolved):
 #' One row per (gene, tissue) pair with collapsed cell-type statistics:
@@ -44,8 +48,9 @@
 #'
 #' @param component Character. \code{"gene"} (default) loads the gene-level
 #'   summary atlas. \code{"tissue"} loads the tissue-resolved atlas.
-#'   \code{"hpa"} loads the full HPA normal tissue IHC panel
-#'   (localisation layer, ~44 tissues). \code{"both"} loads all three.
+#'   \code{"hpa"} loads the three-source protein presence vote (HPA IHC,
+#'   GTEx MS, PaxDb) over 59 HPA tissues, which the tissue gate reads.
+#'   \code{"both"} loads all three.
 #' @param reload Logical. Force reload from package data. Default \code{FALSE}.
 #'
 #' @return For \code{"gene"}: a data frame (one row per gene). For
@@ -113,8 +118,8 @@ load_atlas <- function(component = c("gene", "tissue", "hpa", "both"),
   switch(component,
     gene   = .atlas_env$gene,
     tissue = .atlas_env$tissue,
-    hpa    = .atlas_env$hpa,
-    both   = list(gene = .atlas_env$gene, tissue = .atlas_env$tissue,
+    hpa = .atlas_env$hpa,
+    both = list(gene = .atlas_env$gene, tissue = .atlas_env$tissue,
                   hpa = .atlas_env$hpa)
   )
 }

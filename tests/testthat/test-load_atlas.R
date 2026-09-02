@@ -17,9 +17,10 @@ test_that("load_atlas tissue returns a data frame", {
 test_that("load_atlas both returns a named list", {
   both <- load_atlas("both")
   expect_type(both, "list")
-  expect_named(both, c("gene", "tissue"))
+  expect_named(both, c("gene", "tissue", "hpa"))
   expect_s3_class(both$gene, "data.frame")
   expect_s3_class(both$tissue, "data.frame")
+  expect_s3_class(both$hpa, "data.frame")
 })
 
 test_that("load_atlas caches across calls", {

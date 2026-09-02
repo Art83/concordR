@@ -1,21 +1,17 @@
-#' concordR: Concordance-Aware Quality Control for Proteomic Interpretation
+#' concordR: Protein-Level Audit of Gene Lists
 #'
-#' An atlas of RNA-protein concordance across human tissues, packaged as
-#' a practical QC layer for biofluid proteomic studies. Five functions,
-#' one job: given a gene list from a proteomics experiment, tell the user
-#' what they can and cannot conclude from it.
+#' Audits any gene list at the protein level against an integrated atlas of
+#' RNA to protein concordance. Given proteins nominated as drug targets or
+#' mechanisms from a biofluid or tissue sample, \code{\link{triage}()} scores
+#' each on four independent gates and returns one column per gate:
+#' concordance, tissue presence, biofluid plausibility, and specificity.
+#' \code{\link{audit_call}()} and \code{\link{funnel_class}()} combine the
+#' gates. \code{\link{query_atlas}()} and \code{\link{query_tissue}()} are
+#' direct lookups, \code{\link{plot_gene}()} draws a tissue profile, and
+#' \code{\link{load_atlas}()} manages the session cache.
 #'
-#' The core workflow: \code{\link{triage}()} evaluates drug-target
-#' defensibility through four gates (compartment plausibility,
-#' tissue-of-origin coherence, RNA-protein concordance, and tissue
-#' specificity). \code{\link{query_atlas}()} and
-#' \code{\link{query_tissue}()} provide direct atlas lookups.
-#' \code{\link{plot_gene}()} visualises tissue-resolved concordance
-#' profiles. \code{\link{load_atlas}()} manages session-cached data
-#' loading.
-#'
-#' Both the gene-level and tissue-resolved atlases ship as internal
-#' package data and require no network access.
+#' All atlas objects and thresholds ship as internal package data and need
+#' no network access.
 #'
 #' @name concordR-package
 #' @keywords internal

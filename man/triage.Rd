@@ -2,58 +2,118 @@
 % Please edit documentation in R/triage.R
 \name{triage}
 \alias{triage}
-\title{Audit candidate genes for biofluid drug-target defensibility}
+\title{Triage candidate genes for drug target assessment}
 \usage{
-triage(genes, sample_type, context_tissue = NULL)
+triage(genes, sample_type, context_tissue = NULL, details = FALSE)
 }
 \arguments{
 \item{genes}{Character vector of HGNC gene symbols.}
 
-\item{sample_type}{Character. The biofluid or fraction sampled.}
+\item{sample_type}{Character. Where the proteins were measured. One of
+\code{"plasma"}, \code{"serum"}, \code{"csf"}, \code{"urine"},
+\code{"tissue"}, \code{"cell_lysate"}, \code{"nuclear_fraction"},
+\code{"mitochondrial_fraction"}, \code{"membrane_fraction"}.}
 
-\item{context_tissue}{Character or \code{NULL}. Overrides automatic tissue
-inference. Brain must be one region (e.g. \code{"Cerebellum"}).}
+\item{context_tissue}{Character or \code{NULL}. Tissue the claim is
+about. Overrides automatic inference.}
+
+\item{details}{Logical. When \code{TRUE}, append the evidence behind each
+gate (\code{ensembl_id}, \code{gene_class}, \code{protein_confidence},
+\code{suppression_rate}, \code{tau}, \code{protein_breadth},
+\code{localisation}, \code{n_platforms_context},
+\code{mechanism_tier}). Default \code{FALSE}.}
 }
 \value{
-A data frame, one row per gene, with the independent gate columns
-above plus a prose \code{reason}. No rollup verdict.
+A data frame with one row per input gene, in input order. Seven
+columns by default: \code{gene_symbol}, \code{concordance},
+\code{tissue}, \code{biofluid_plausibility}, \code{biofluid_rescue},
+\code{specificity}, \code{primary_tissue}. The resolved sample type and
+context tissue are stored in the \code{"triage_context"} attribute.
 }
 \description{
-Reports, per gene, what each gate independently found. There is no single
-verdict: each gate is its own controlled-vocabulary column, scored on its
-own data source and NA only where that source is silent. The caller filters
-and combines the columns, widest gate first, then narrowing into the atlas.
+Scores each gene on four independent gates and returns one column per
+gate. No verdict is produced here. It's up to user to work with the gates and
+work out a decision making strategy, if verdict is needed there's audit function.
+Combine the gates with
+\code{\link{audit_call}} for an accept/caution/decline call, or with
+\code{\link{funnel_class}} for a first-failure partition in a stated
+order. Each gate is a function of the atlas data and the sample type
+only. No gate reads another gate's result.
 }
-\section{Automatic tissue inference}{
-
-Plasma, serum, and CSF are systemic and receive no automatic tissue gate.
-Although CSF is anatomically proximal to brain, roughly 80\% of its protein
-derives from plasma, so automatic brain attribution is unsound. Urine
-implies Kidney. A supplied \code{context_tissue} overrides inference and
-narrows to that region. Brain must be given as one of four regions.
-}
-
-\section{Gate columns}{
+\section{Gates}{
 
 \describe{
-\item{\code{concordance}}{Atlas only. concordant, variable, suppressed,
-low_expression, not_in_atlas.}
-\item{\code{biofluid_plausibility}}{UniProt localisation, raw call.
-plausible, implausible, no_data.}
-\item{\code{biofluid_rescue}}{Logical. TRUE where a projection or secreted
-protein would be rescued in a biofluid (microscopy under-detects
-proteins that have left the cell of origin). Reported beside
-plausibility, not folded into it.}
-\item{\code{tissue}}{Union gate. detected, detected_1platform, discordant,
-mismatch, coverage_limited, not_in_panel, systemic_na.}
-\item{\code{specificity}}{HPA breadth. specific, broad, na.}
-\item{\code{protein_tissues}}{Tissues of detection, from the union gate,
-populated off-atlas.}
-\item{\code{rna_tissues}}{Atlas-bound, NA off-atlas.}
-\item{\code{reason}}{Prose summary for reading, not for filtering.}
+\item{\code{concordance}}{Gene-level RNA to protein concordance class
+from the atlas. \code{"concordant"}, \code{"variable"},
+\code{"suppressed"}, \code{"suppressed_unconfirmed"},
+\code{"low_expression"}, or \code{"not_in_atlas"}.
+\code{"suppressed_unconfirmed"} means the atlas calls the gene
+suppressed but that call cannot be trusted, either because the
+protein is secreted or projection-localised and the sample is a
+biofluid (cellular proteomics under-detects proteins that have left
+the cell), or because the other platforms in the presence vote
+disagree with the IHC call in the context tissue.}
+\item{\code{tissue}}{Protein presence in the context tissue from the
+three-source vote (HPA IHC, GTEx MS, PaxDb). \code{"detected"} (two
+or more voters, all present), \code{"detected_1platform"} (one voter,
+present), \code{"discordant"} (voters disagree), \code{"mismatch"}
+(two or more voters, all absent), \code{"insufficient_coverage"}
+(one voter, absent), \code{"not_in_panel"} (no row), or
+\code{"systemic_na"} (no tissue implied and none supplied).}
+\item{\code{biofluid_plausibility}}{Whether the protein's subcellular
+localisation (UniProt) is consistent with the sample type.
+\code{"plausible"}, \code{"implausible"}, \code{"unknown"} (no
+localisation data), or \code{"na"} (sample type has no rule).}
+\item{\code{biofluid_rescue}}{Logical. \code{TRUE} when plausibility is
+\code{"implausible"} but the protein is projection-localised, the
+sample is plasma, serum, or CSF, and either no context tissue was
+given or the tissue gate finds the protein present there. This is
+the damage-release route (the NEFL pattern). \code{NA} when
+plausibility is \code{"na"}.}
+\item{\code{specificity}}{Protein-level tissue specificity from the HPA
+IHC panel. \code{"specific"} when protein tau (highest IHC level in
+any cell type, per tissue, across every tissue HPA stained) is at or
+above the shipped threshold, \code{"broad"} below
+it, \code{"sparse"} when the gene is IHC-detected in too few tissues
+for tau to describe a profile and the bulk platforms agree it is
+restricted, \code{"na"} when the gene has no reliable IHC anywhere
+or when its few IHC hits are contradicted by broad bulk detection
+(the antibody is uninformative for this gene). RNA is not used in
+this gate.}
+\item{\code{primary_tissue}}{For specific genes, the set of HPA
+tissues tied at the gene's highest IHC level, alphabetical and
+comma-joined. A single winner is undefined for most genes (median
+six tissues share the maximum), so the set is reported.
+\code{"multiple"} for broad genes. \code{NA} for sparse and na.}
 }
 }
 
+\section{Tissue inference}{
+
+Plasma, serum, and CSF are systemic. Although CSF is anatomically
+proximal to brain, roughly 80\\% of its protein content derives from
+plasma, so no brain region is implied automatically. Urine implies
+Kidney. \code{context_tissue} overrides any implication and is validated
+against the tissue vocabulary of the presence vote. Brain is resolved
+into regions; pass one explicitly (\code{"Cerebral cortex"}), not
+\code{"Brain"}.
+}
+
+\examples{
+\dontrun{
+# CSF with no tissue implied
+triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf")
+
+# CSF against a named brain region
+triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf",
+       context_tissue = "Cerebral cortex")
+
+# Evidence behind the gates
+triage("NEFL", sample_type = "csf", details = TRUE)
+}
+
+}
 \seealso{
+\code{\link{audit_call}}, \code{\link{funnel_class}},
 \code{\link{query_atlas}}
 }

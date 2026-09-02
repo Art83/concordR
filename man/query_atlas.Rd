@@ -2,42 +2,40 @@
 % Please edit documentation in R/query_atlas.R
 \name{query_atlas}
 \alias{query_atlas}
-\title{Look up genes in the RNA--protein concordance atlas}
+\title{Look up genes in the RNA to protein concordance atlas}
 \usage{
 query_atlas(genes, atlas = NULL, missing = c("keep", "drop", "warn"))
 }
 \arguments{
-\item{genes}{Character vector of HGNC gene symbols.}
+\item{genes}{Character vector of HGNC gene symbols. Matching is
+case-insensitive and repeats are collapsed, so \code{c("NEFL", "nefl")}
+returns one row.}
 
 \item{atlas}{Optional. A gene-level atlas data frame (as returned by
 \code{\link{load_atlas}("gene")}). If \code{NULL}, the atlas is loaded
-automatically from package data.}
+from package data.}
 
 \item{missing}{Character. How to handle genes not found in the atlas.
-\code{"keep"} (default) returns a row with \code{gene_class = NA};
-\code{"drop"} silently removes them; \code{"warn"} keeps them and
-prints a message.}
+\code{"keep"} (default) returns a row with \code{found = FALSE} and
+\code{NA} in every atlas column; \code{"drop"} removes them;
+\code{"warn"} keeps them and prints a message.}
 }
 \value{
-A data frame with one row per queried gene (in input order),
-containing all atlas columns plus a logical \code{found} column.
-Genes not in the atlas have \code{found = FALSE} and \code{NA} for
-all atlas fields.
+A data frame with one row per distinct queried gene, in input
+order, containing all atlas columns plus a logical \code{found}. For
+found genes \code{gene_symbol} carries the atlas spelling; for missing
+genes it carries the input as typed.
 }
 \description{
-The foundational accessor. Returns concordance class, protein confidence,
-detection rate, mechanistic tier, and subcellular localisation flags
-for one or more genes. All other concordR functions call this internally.
+Returns the gene-level atlas row for one or more genes: concordance
+class, protein confidence, suppression rate, mechanism tier, and the
+specificity inputs. Localisation flags are not in this table; see
+\code{\link{triage}}.
 }
 \examples{
 \dontrun{
-# Single gene
 query_atlas("TREM2")
-
-# Panel of NDD-relevant genes
 query_atlas(c("NEFL", "GFAP", "TREM2", "NRGN", "VILIP1"))
-
-# Drop unknowns
 query_atlas(c("NEFL", "FAKEGENE"), missing = "drop")
 }
 

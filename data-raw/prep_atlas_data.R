@@ -12,9 +12,9 @@ library(tidyr)
 # These are all outputs from companion paper on rna to protein concordance
 PROJECT_ROOT  <- "D:/Bioinformatics_projects/hpa_to_tabula"
 ATLAS_CSV <- file.path(PROJECT_ROOT, "results/ml/gene_discordance_profiles.csv")
-TIER_CSV  <- file.path(PROJECT_ROOT, "results/tables/three_way_decomposition.csv")
+TIER_CSV <- file.path(PROJECT_ROOT, "results/tables/three_way_decomposition.csv")
 PARQUET_DIR <- file.path(PROJECT_ROOT, "results/ml")
-EXTERNAL_DIR  <- file.path(PROJECT_ROOT, "external_data")
+EXTERNAL_DIR <- file.path(PROJECT_ROOT, "external_data")
 LOC_CSV <- "D:/Bioinformatics_projects/localisation_uniprot.csv"
 
 parquet_candidates <- list.files(
@@ -37,8 +37,8 @@ if (length(missing_required) > 0)
        paste(missing_required, collapse = ", "))
 
 optional_atlas_cols <- c("suppression_rate",
-                         "n_tissues_concordant",
-                         "n_tissues_suppressed")
+                         "n_concordant_pos",
+                         "n_suppressed")
 missing_optional <- setdiff(optional_atlas_cols, names(atlas))
 if (length(missing_optional) > 0)
   warning("Atlas CSV is missing optional columns: ",
@@ -56,8 +56,8 @@ stopifnot("data.table" %in% class(df))
 stopifnot(all(c("gene_symbol", "ts_tissue", "rna_rank") %in% names(df)))
 
 # ---- 3. Tissue count per gene ----------------------------------------------
-# (was section 4; localisation gene_feat block removed, is_* no longer shipped)
-n_tissues <- df[, list(n_tissues = uniqueN(ts_tissue)), by = gene_symbol]
+# By ensembl_id: a few symbols map to two IDs and must not be pooled.
+n_tissues <- df[, list(n_tissues = uniqueN(ts_tissue)), by = ensembl_id]
 
 # ---- 4. Mechanistic tier (optional) ----------------------------------------
 if (file.exists(TIER_CSV)) {
@@ -85,10 +85,10 @@ tissue_atlas <- df[, list(
 ), by = list(gene_symbol, ensembl_id, ts_tissue)]
 
 tissue_atlas[, tissue_class := data.table::fcase(
-  rna_mean_tissue == 0 & detect_fraction == 0,            "low_expression",
-  rna_rank_max < 0.20 & detect_fraction < 0.10,         "low_expression",
-  rna_rank_max >= 0.50 & detect_fraction >= 0.50,         "concordant_in_tissue",
-  rna_rank_max >= 0.50 & detect_fraction <  0.20,         "suppressed_in_tissue",
+  rna_mean_tissue == 0 & detect_fraction == 0, "low_expression",
+  rna_rank_max < 0.20 & detect_fraction < 0.10, "low_expression",
+  rna_rank_max >= 0.50 & detect_fraction >= 0.50, "concordant_in_tissue",
+  rna_rank_max >= 0.50 & detect_fraction <  0.20, "suppressed_in_tissue",
   default = "variable_in_tissue"
 )]
 
@@ -99,14 +99,14 @@ print(table(tissue_atlas$tissue_class, useNA = "ifany"))
 concordance_atlas <- atlas
 if ("n_tissues" %in% names(concordance_atlas))
   concordance_atlas[["n_tissues"]] <- NULL
-concordance_atlas <- merge(concordance_atlas, n_tissues, by = "gene_symbol", all.x = TRUE)
+concordance_atlas <- merge(concordance_atlas, n_tissues, by = "ensembl_id", all.x = TRUE)
 
 # ---- 7. Column ordering ----------------------------------------------------
 preferred_order <- c(
   "gene_symbol", "ensembl_id",
   "gene_class",  "protein_confidence", "detection_rate", "suppression_rate",
   "mean_rna_rank",
-  "n_tissues", "n_tissues_concordant", "n_tissues_suppressed",
+  "n_tissues", "n_concordant_pos", "n_suppressed",
   "mechanism_tier"
 )
 preferred_order <- intersect(preferred_order, names(concordance_atlas))
@@ -175,9 +175,8 @@ cat(sprintf("PaxDb: %d (gene, tissue) rows, %d atlas genes covered\n",
             nrow(paxdb), n_atlas_with_paxdb))
 
 # --- GTEx protein TS and RNA TS (direction, for tissue_atlas concordance) ---
-# Every GTEx column that maps to one of the 24 atlas tissues, not a hand-picked
-# subset. Split sub-regions fold together in the group_by below, recovering
-# Cerebellum and SunExpo skin that the old list dropped.
+# Every GTEx column that maps to one of the 24 atlas tissues. 
+
 GTEX_TO_ATLAS <- c(
   "Brain.Cerebellum" = "Cerebellum",
   "Brain.Cortex" = "Cerebral cortex",
@@ -229,7 +228,7 @@ gtex_medians_raw <- read.csv(file.path(EXTERNAL_DIR, "gtex_protein_tissue_median
                              stringsAsFactors = FALSE)
 
 # ===========================================================================
-# tissue_atlas: augment with direction (concordance-gate machinery only)
+# tissue_atlas
 # ===========================================================================
 tissue_atlas <- tissue_atlas %>%
   left_join(gtex_ts, by = c("ensembl_id", "ts_tissue")) %>%
@@ -259,13 +258,11 @@ tissue_atlas <- tissue_atlas %>%
   )
 
 # ===========================================================================
-# Tissue gate: three-source union presence vote   (object name: hpa_tissue)
+# Tissue gate: three-source union presence vote
 # ===========================================================================
 # Built over the union of HPA, GTEx, and PaxDb: every gene any source sees,
 # across every tissue any source covers. Genes HPA never stained still carry
-# GTEx and PaxDb evidence, which is the whole point of decoupling. The object
-# keeps the name hpa_tissue so load_atlas() and triage() need no change; the
-# ihc_* columns are  NA for genes outside the HPA panel.
+# GTEx and PaxDb evidence.
 HPA_IHC_PATH <- file.path(EXTERNAL_DIR, "normal_ihc_data.tsv")
 stopifnot(file.exists(HPA_IHC_PATH))
 
@@ -277,6 +274,10 @@ setnames(hpa_raw, c("Gene", "Gene name", "Tissue", "IHC tissue name",
 hpa_raw <- hpa_raw[reliability != "Uncertain"]
 hpa_raw[, level_num := fcase(
   level == "High", 3L, level == "Medium", 2L, level == "Low", 1L, default = 0L)]
+# Reliability tiers after the Uncertain filter, for reporting under details.
+hpa_raw[, reliability_num := fcase(
+  reliability == "Enhanced", 3L, reliability == "Supported", 2L,
+  reliability == "Approved", 1L, default = 0L)]
 
 # HPA IHC summary per (gene, tissue). hpa_call is present for every HPA pair.
 hpa_ihc <- hpa_raw[,
@@ -284,11 +285,12 @@ hpa_ihc <- hpa_raw[,
     ihc_max_level = max(level_num, na.rm = TRUE),
     ihc_detected = any(level_num > 0, na.rm = TRUE),
     ihc_n_cell_types = .N,
-    ihc_n_detected = sum(level_num > 0, na.rm = TRUE)
+    ihc_n_detected = sum(level_num > 0, na.rm = TRUE),
+    ihc_reliability_max = max(reliability_num, na.rm = TRUE)
   ),
   by = list(ensembl_id, gene_symbol, tissue)
 ]
-hpa_ihc[, hpa_call  := ifelse(ihc_detected, "detected", "not_detected")]
+hpa_ihc[, hpa_call := ifelse(ihc_detected, "detected", "not_detected")]
 hpa_ihc[, ihc_level := fcase(
   ihc_max_level == 3L, "High", ihc_max_level == 2L, "Medium",
   ihc_max_level == 1L, "Low", default = "Not detected")]
@@ -325,9 +327,9 @@ gtex_presence <- gtex_medians_raw %>%
   mutate(gtex_in_universe = any(!is.na(val))) %>%
   ungroup() %>%
   mutate(gtex_call = case_when(
-    !is.na(val)                   ~ "detected",
+    !is.na(val) ~ "detected",
     is.na(val) & gtex_in_universe ~ "not_detected",
-    TRUE                          ~ NA_character_)) %>%
+    TRUE ~ NA_character_)) %>%
   filter(!is.na(gtex_call)) %>%
   dplyr::select(ensembl_id, tissue, gtex_call)
 
@@ -336,7 +338,7 @@ PAXDB_TO_HPA <- c(
   "Cerebral cortex" = "Cerebral cortex", "Heart" = "Heart muscle",
   "Kidney" = "Kidney", "Liver" = "Liver",
   "Lung" = "Lung", "Lymph Node" = "Lymph node",
-  "Pancreas" = "Pancreas", "Skin"    = "Skin",
+  "Pancreas" = "Pancreas", "Skin" = "Skin",
   "Spleen" = "Spleen", "Stomach" = "Stomach",
   "Testis" = "Testis", "Colon"   = "Colon"
 )
@@ -355,7 +357,7 @@ paxdb_presence <- tidyr::expand_grid(ensembl_id = paxdb_universe,
 # --- Union the three sources on (ensembl_id, tissue) ------------------------
 # A row exists wherever any source has a call. HPA, GTEx, or PaxDb vote
 # detected or not_detected; an absent source is NA and casts no vote. Presence
-# and absence are asserted only with two or more voters, so a lone hit is
+# and absence are asserted only with two or more voters, so a single hit is
 # detected_by_one and a single platform cannot assert absence.
 is_det <- function(x) !is.na(x) & x == "detected"
 is_abs <- function(x) !is.na(x) & x == "not_detected"
@@ -408,21 +410,130 @@ print(table(hpa_tissue$verdict, useNA = "ifany"))
 protein_tissue_summary <- as.data.table(hpa_tissue)[any_detected == TRUE,
   list(protein_tissues = paste(sort(unique(tissue)), collapse = ", "),
        n_tissues_protein = uniqueN(tissue)),
-  by = gene_symbol]
+  by = ensembl_id]
 protein_tissue_summary <- as.data.frame(protein_tissue_summary)
 
 rna_tissue_summary <- as.data.table(tissue_atlas)[rna_rank_max >= 0.5,
   list(rna_tissues = paste(sort(unique(ts_tissue)), collapse = ", "),
        n_tissues_rna = uniqueN(ts_tissue)),
-  by = gene_symbol]
+  by = ensembl_id]
 rna_tissue_summary <- as.data.frame(rna_tissue_summary)
 
 concordance_atlas <- concordance_atlas %>%
-  left_join(protein_tissue_summary, by = "gene_symbol") %>%
-  left_join(rna_tissue_summary, by = "gene_symbol")
+  left_join(protein_tissue_summary, by = "ensembl_id") %>%
+  left_join(rna_tissue_summary, by = "ensembl_id")
 
 # ===========================================================================
-# localisation_flags: single UniProt source for the compartment gate
+# Specificity inputs: tau (RNA magnitude) and protein_breadth (any platform)
+# ===========================================================================
+# tau over log1p(rna_mean_tissue) across the tissues in
+# which the gene was profiled. The gate asks whether
+# production concentrates anywhere.
+# protein_breadth is the fraction of profiled tissues with protein evidence
+# from any of IHC, GTEx MS, or PaxDb. The denominator is the number of tissues
+# the gene was profiled in, not the atlas total.
+# Grouped by ensembl_id: a few symbols map to two IDs and must not be pooled.
+TAU_MIN_TISSUES <- 10L
+
+specificity_inputs <- as.data.table(tissue_atlas)[, {
+  x <- log1p(rna_mean_tissue)
+  x[!is.finite(x)] <- NA_real_
+  n <- sum(!is.na(x))
+  mx <- if (n > 0) max(x, na.rm = TRUE) else NA_real_
+  tau <- if (n >= TAU_MIN_TISSUES && !is.na(mx) && mx > 0)
+    sum(1 - x[!is.na(x)] / mx) / (n - 1) else NA_real_
+  list(
+    tau = tau,
+    protein_breadth = mean(protein_evidence_sources > 0, na.rm = TRUE),
+    n_tissues_profiled = .N
+  )
+}, by = ensembl_id]
+specificity_inputs <- as.data.frame(specificity_inputs)
+
+concordance_atlas <- concordance_atlas %>%
+  left_join(specificity_inputs, by = "ensembl_id")
+
+cat("\n==== specificity inputs ====\n")
+cat("tau:             ", sum(!is.na(concordance_atlas$tau)), " genes\n", sep = "")
+cat("protein_breadth: ", sum(!is.na(concordance_atlas$protein_breadth)), " genes\n", sep = "")
+print(summary(concordance_atlas$tau))
+print(summary(concordance_atlas$protein_breadth))
+
+# ===========================================================================
+# Protein specificity: tau over the HPA IHC panel (the gate input)
+# ===========================================================================
+# The specificity gate is protein-level, so it reads IHC and nothing else.
+# RNA tau (above) and protein_breadth are shipped as evidence only.
+# Per (gene, tissue) value: ihc_max_level, the highest staining level in
+# any cell type of that tissue, over every tissue HPA stained (the
+# 59-tissue panel in hpa_tissue, not the 24-tissue atlas). Level alone.
+# Weighting by fraction of cell types detected was tried and rejected: HPA
+# scores many tissues on one cell type, so any High there scores the
+# maximum, thousands of genes tie, and the tiebreak decides. Tau over that
+# level per ensembl_id. NA when the gene has no IHC anywhere or fewer than
+# PROTEIN_TAU_MIN_TISSUES stained tissues.
+# primary_tissue_ihc is the set of tissues tied at the gene's maximum
+# level, HPA names, alphabetical, comma-joined. A single winner is
+# undefined for four genes in five (median six tissues share the maximum),
+# so the set is the only honest representation. NA when no tissue scores
+# above zero.
+# Known source gaps (HPA annotation, not our filter): ALB, APOB, CP are
+# "Not detected" in hepatocytes at Enhanced or Supported reliability. These
+# genes read specificity "na", which is the honest protein-level answer.
+PROTEIN_TAU_MIN_TISSUES <- 10L
+
+ihc_panel <- as.data.table(hpa_tissue)[!is.na(ihc_max_level),
+  list(ensembl_id, tissue, ihc_max_level, ihc_n_detected, ihc_n_cell_types)]
+
+# Bulk (GTEx MS, PaxDb) detection breadth over the same panel. Read by the
+# specificity gate only to decide whether IHC is informative for a gene
+# with few IHC hits: a one-hit IHC gene that bulk sees in most covered
+# tissues is an antibody failure, one that bulk also sees in one tissue is
+# a thin but consistent restriction. Not a specificity measure.
+bulk_panel <- as.data.table(hpa_tissue)[, {
+  gt <- !is.na(gtex_call); px <- !is.na(paxdb_call)
+  cov <- gt | px
+  det <- (gt & gtex_call == "detected") | (px & paxdb_call == "detected")
+  list(n_tissues_bulk_covered = sum(cov), n_tissues_bulk_detected = sum(det))
+}, by = ensembl_id]
+
+protein_specificity <- ihc_panel[, {
+  s <- as.numeric(ihc_max_level)
+  n <- .N
+  mx <- max(s)
+  ptau <- if (n >= PROTEIN_TAU_MIN_TISSUES && mx > 0)
+    sum(1 - s / mx) / (n - 1) else NA_real_
+  top <- if (mx > 0) sort(tissue[s == mx]) else character(0)
+  list(
+    protein_tau = ptau,
+    primary_tissue_ihc = if (length(top)) paste(top, collapse = ", ") else NA_character_,
+    n_primary_tissues = length(top),
+    n_tissues_ihc = n,
+    n_tissues_ihc_detected = sum(s > 0)
+  )
+}, by = ensembl_id]
+protein_specificity <- as.data.frame(protein_specificity)
+protein_specificity <- merge(protein_specificity, as.data.frame(bulk_panel),
+                             by = "ensembl_id", all.x = TRUE)
+
+concordance_atlas <- concordance_atlas %>%
+  left_join(protein_specificity, by = "ensembl_id")
+
+cat("\n==== protein specificity (IHC panel) ====\n")
+cat("protein_tau:            ", sum(!is.na(concordance_atlas$protein_tau)), " genes\n", sep = "")
+cat("stained, never detected: ", sum(!is.na(concordance_atlas$n_tissues_ihc) &
+                                     concordance_atlas$n_tissues_ihc_detected == 0), " genes\n", sep = "")
+cat("detected in one tissue: ", sum(concordance_atlas$n_tissues_ihc_detected == 1, na.rm = TRUE), " genes\n", sep = "")
+one_hit <- !is.na(concordance_atlas$n_tissues_ihc_detected) & concordance_atlas$n_tissues_ihc_detected == 1
+bulk_frac <- concordance_atlas$n_tissues_bulk_detected / concordance_atlas$n_tissues_bulk_covered
+cat("  of which bulk-detected in >= half of covered tissues: ",
+    sum(one_hit & !is.na(bulk_frac) & bulk_frac >= 0.5), "\n", sep = "")
+cat("  of which bulk-detected in exactly one tissue:         ",
+    sum(one_hit & concordance_atlas$n_tissues_bulk_detected %in% 1L), "\n", sep = "")
+print(summary(concordance_atlas$protein_tau))
+
+# ===========================================================================
+# localisation_flags: single UniProt source for the biofluid plausibility gate
 # ===========================================================================
 localisation_flags <- read.csv(LOC_CSV, stringsAsFactors = FALSE)
 
@@ -441,17 +552,20 @@ if (length(loc_missing_cols) > 0)
 for (col in grep("^is_", names(localisation_flags), value = TRUE))
   localisation_flags[[col]] <- as.integer(localisation_flags[[col]])
 
-# Coverage check. With one localisation source and no fallback, any atlas gene
-# absent here reads as localisation unknown at run time. Report the gap.
-# Flip to stop() if you want to enforce full UniProt coverage of the atlas.
-atlas_no_loc <- setdiff(toupper(concordance_atlas$gene_symbol),
-                        toupper(localisation_flags$gene_symbol))
+# Coverage check.
+# Coverage check on ensembl_id, which is what .join_localisation() matches
+# first. Symbol is the fallback at run time, so a symbol-only miss here is
+# not a miss in the package.
+atlas_no_loc <- setdiff(concordance_atlas$ensembl_id, localisation_flags$ensembl_id)
+sym_rescued <- toupper(concordance_atlas$gene_symbol[concordance_atlas$ensembl_id %in% atlas_no_loc]) %in%
+               toupper(localisation_flags$gene_symbol)
 if (length(atlas_no_loc) > 0)
-  warning(length(atlas_no_loc),
-          " atlas genes are absent from localisation_flags and will read as ",
-          "localisation unknown: ",
-          paste(head(atlas_no_loc, 20), collapse = ", "),
-          if (length(atlas_no_loc) > 20) " ..." else "")
+  warning(length(atlas_no_loc), " atlas genes have no ensembl_id match in ",
+          "localisation_flags (", sum(sym_rescued), " recoverable by symbol, ",
+          sum(!sym_rescued), " will read as localisation unknown): ",
+          paste(head(concordance_atlas$gene_symbol[concordance_atlas$ensembl_id %in% atlas_no_loc][!sym_rescued], 20),
+                collapse = ", "),
+          if (sum(!sym_rescued) > 20) " ..." else "")
 
 # ===========================================================================
 # Save
@@ -467,5 +581,12 @@ cat("tissue_atlas:      ", nrow(tissue_atlas), "x", ncol(tissue_atlas), "\n")
 cat("hpa_tissue:        ", nrow(hpa_tissue), "x", ncol(hpa_tissue), "\n")
 cat("localisation_flags:", nrow(localisation_flags), "x", ncol(localisation_flags), "\n")
 
+# ---- Thresholds --------------------------------------------------------------
+# Defined in data-raw/derive_thresholds.R so the characterisation work that
+# justifies them has one home. Sourced here so the values ship with the data.
+source("data-raw/derive_thresholds.R", local = TRUE)
+stopifnot(is.list(atlas_thresholds))
+
 usethis::use_data(concordance_atlas, tissue_atlas, hpa_tissue, localisation_flags,
+                  atlas_thresholds,
                   internal = TRUE, overwrite = TRUE)

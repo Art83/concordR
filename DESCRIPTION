@@ -1,32 +1,30 @@
 Package: concordR
-Title: Concordance-Aware Quality Control for Proteomic Interpretation
-Version: 0.1.0
+Title: Protein-Level Audit of Gene Lists Against an RNA to Protein Concordance Atlas
+Version: 0.2.0
 Authors@R: person("Artur", "Shvetcov", role = c("aut", "cre"),
                   email = "shvetsov1983@gmail.com")
-Description: An atlas of RNA-protein concordance across human tissues,
-    packaged as a quality-control layer for biofluid proteomic studies.
-    Given a list of differentially abundant proteins from plasma or CSF,
-    concordR evaluates whether each gene's nomination is defensible:
-    whether its subcellular localisation is consistent with the sample
-    compartment, whether it is expressed at protein level in the
-    tissue relevant to the claim, and whether RNA reliably predicts
-    protein for that gene. Built on an integrated atlas spanning
-    488,190 observations across 11,154 genes, 24 tissues, and
-    53 cell types.
+Description: Audits any gene list at the protein level against an integrated
+    atlas of RNA to protein concordance spanning 488,190 observations across
+    11,154 genes, 24 tissues, and 53 cell types. Given proteins nominated as
+    drug targets or mechanisms from plasma, CSF, or another sample type,
+    concordR scores each on four independent gates: whether RNA reliably
+    predicts protein for that gene, whether the protein is detected in the
+    tissue the claim is about, whether its subcellular localisation is
+    consistent with the sample, and how tissue-specific its protein
+    expression is. Gates are reported separately and combined by the user,
+    or by the supplied accept/caution/decline and funnel functions.
 License: MIT + file LICENSE
 URL: https://github.com/Art83/concordR
 BugReports: https://github.com/Art83/concordR/issues
 Depends: R (>= 4.1.0)
 Imports:
     graphics,
-    grDevices
+    grDevices,
+    stats,
+    utils
 Suggests:
-    testthat (>= 3.0.0),
-    knitr,
-    rmarkdown
+    testthat (>= 3.0.0)
 Encoding: UTF-8
-LazyData: true
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-VignetteBuilder: knitr
 Config/testthat/edition: 3

@@ -52,6 +52,20 @@ test_that("query_atlas is case-insensitive", {
   expect_equal(res1$gene_class, res2$gene_class)
 })
 
+test_that("query_atlas collapses case variants and repeats to one row", {
+  res <- query_atlas(c("NEFL", "nefl", " NEFL ", "GFAP", "GFAP"))
+  expect_equal(nrow(res), 2L)
+  expect_equal(res$gene_symbol, c("NEFL", "GFAP"))
+})
+
+test_that("query_atlas missing rows keep the input spelling and NA typed columns", {
+  res <- query_atlas(c("GFAP", "FakeGene_xyz", "NEFL"))
+  expect_equal(res$gene_symbol, c("GFAP", "FakeGene_xyz", "NEFL"))
+  expect_equal(res$found, c(TRUE, FALSE, TRUE))
+  expect_true(is.na(res$gene_class[2]))
+  expect_type(res$suppression_rate, "double")
+})
+
 test_that("query_tissue returns tissue-level data", {
   res <- query_tissue("NEFL")
   expect_s3_class(res, "data.frame")
@@ -63,4 +77,24 @@ test_that("query_tissue returns tissue-level data", {
 test_that("query_tissue filters by tissue", {
   res <- query_tissue("NEFL", tissues = "Cerebellum")
   expect_true(all(res$ts_tissue == "Cerebellum"))
+})
+
+test_that("query_tissue tissue matching is case-insensitive", {
+  a <- query_tissue("NEFL", tissues = "cerebellum")
+  b <- query_tissue("NEFL", tissues = "Cerebellum")
+  expect_equal(nrow(a), nrow(b))
+  expect_equal(nrow(a), 1L)
+})
+
+test_that("query_tissue rejects unknown tissues with the vocabulary", {
+  expect_error(query_tissue("NEFL", tissues = "Mars"), "Unknown tissue")
+  expect_error(query_tissue("NEFL", tissues = "Mars"), "Cerebellum")
+})
+
+test_that("query_tissue orders by input gene then tissue and reports absent genes", {
+  expect_message(res <- query_tissue(c("GFAP", "FAKEGENE_XYZ", "NEFL")), "no rows")
+  expect_equal(unique(res$gene_symbol), c("GFAP", "NEFL"))
+  g <- res[res$gene_symbol == "GFAP", ]
+  expect_equal(g$ts_tissue, sort(g$ts_tissue))
+  expect_silent(query_tissue(c("GFAP", "FAKEGENE_XYZ"), missing = "silent"))
 })

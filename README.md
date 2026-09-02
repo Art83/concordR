@@ -24,29 +24,34 @@ remotes::install_github("Art83/concordR")
 
 | Function | What it does |
 |---|---|
-| `load_atlas()` | Load the atlas (auto-cached, called internally). |
-| `query_atlas()` | Look up concordance class, suppression rate, mechanistic tier, localisation. |
-| `query_tissue()` | Tissue-resolved lookup: per-tissue concordance, protein detection, cross-platform evidence. |
-| `triage()` | Drug-target defensibility audit: compartment, tissue-of-origin, concordance, and specificity gates. |
-| `plot_gene()` | Tissue-resolved concordance profile for a single gene. |
+| `triage()` | Score a gene list on four independent gates. One column per gate, no verdict. |
+| `audit_call()` | Accept, caution, or decline from the gate columns. |
+| `funnel_class()` | First failing gate in a stated order, with an optional survivor table. |
+| `query_atlas()` | Gene-level lookup: concordance class, suppression rate, mechanistic tier. |
+| `query_tissue()` | Tissue-resolved lookup: per-tissue concordance and protein evidence. |
+| `plot_gene()` | Tissue-resolved concordance profile for one gene. |
+| `load_atlas()` | Load the atlas objects (cached, called internally). |
 
 ## Quick start
 
 ```r
 library(concordR)
 
+# 1. Gate columns for proteins nominated from CSF, no tissue implied
+triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf")
 
+# 2. The same list against a named brain region
+res <- triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf",
+              context_tissue = "Cerebral cortex")
 
-# 1. Triage drug-target claims from a CSF study
-triage(c("NEFL", "GFAP", "SPANXA1"),
-       sample_type = "csf")
+# 3. Combine the gates
+res$call <- audit_call(res)
+funnel_class(res, table = TRUE)
 
+# 4. Evidence behind each gate
+triage("NEFL", sample_type = "csf", details = TRUE)
 
-# 2. Narrow to a specific brain region
-triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf", context_tissue = "Cerebellum")
-
-
-# 3. Visualise a gene's tissue profile
+# 5. Visualise a gene's tissue profile
 plot_gene("TREM2")
 ```
 
@@ -54,10 +59,12 @@ plot_gene("TREM2")
 
 concordR audits inferential claims made from biofluid proteomics: plasma, CSF, urine. It catches the gap between where you measured and what you're claiming. The four gates in `triage()` are:
 
-1. **Compartment plausibility** - is the protein's subcellular localisation consistent with the biofluid? 
-2. **Tissue-of-origin** - is the protein detected at protein level in the tissue implied by research?
-3. **Concordance** - does RNA reliably predict protein for this gene?
-4. **Tissue specificity** - is the protein broadly expressed, undermining tissue-of-origin claims?
+1. **Concordance** - does RNA reliably predict protein for this gene?
+2. **Tissue** - is the protein detected in the tissue the claim is about, by a vote across HPA IHC, GTEx MS, and PaxDb?
+3. **Biofluid plausibility** - is the protein's subcellular localisation consistent with the sample type, or is there a damage-release route?
+4. **Specificity** - how tissue-specific is the protein at the cell-type level, and where is it made?
+
+Each gate is reported on its own. `audit_call()` and `funnel_class()` are the two supplied ways to combine them, and a user is free to write another.
 
 ## Companion to
 

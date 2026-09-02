@@ -2,35 +2,33 @@
 # query_atlas for gene-level lookup
 # =============================================================================
 
-#' Look up genes in the RNA-protein concordance atlas
+#' Look up genes in the RNA to protein concordance atlas
 #'
-#' The foundational accessor. Returns concordance class, protein confidence,
-#' detection rate, mechanistic tier, and subcellular localisation flags
-#' for one or more genes. All other concordR functions call this internally.
+#' Returns the gene-level atlas row for one or more genes: concordance
+#' class, protein confidence, suppression rate, mechanism tier, and the
+#' specificity inputs. Localisation flags are not in this table; see
+#' \code{\link{triage}}.
 #'
-#' @param genes Character vector of HGNC gene symbols.
+#' @param genes Character vector of HGNC gene symbols. Matching is
+#'   case-insensitive and repeats are collapsed, so \code{c("NEFL", "nefl")}
+#'   returns one row.
 #' @param atlas Optional. A gene-level atlas data frame (as returned by
 #'   \code{\link{load_atlas}("gene")}). If \code{NULL}, the atlas is loaded
-#'   automatically from package data.
+#'   from package data.
 #' @param missing Character. How to handle genes not found in the atlas.
-#'   \code{"keep"} (default) returns a row with \code{gene_class = NA};
-#'   \code{"drop"} silently removes them; \code{"warn"} keeps them and
-#'   prints a message.
+#'   \code{"keep"} (default) returns a row with \code{found = FALSE} and
+#'   \code{NA} in every atlas column; \code{"drop"} removes them;
+#'   \code{"warn"} keeps them and prints a message.
 #'
-#' @return A data frame with one row per queried gene (in input order),
-#'   containing all atlas columns plus a logical \code{found} column.
-#'   Genes not in the atlas have \code{found = FALSE} and \code{NA} for
-#'   all atlas fields.
+#' @return A data frame with one row per distinct queried gene, in input
+#'   order, containing all atlas columns plus a logical \code{found}. For
+#'   found genes \code{gene_symbol} carries the atlas spelling; for missing
+#'   genes it carries the input as typed.
 #'
 #' @examples
 #' \dontrun{
-#' # Single gene
 #' query_atlas("TREM2")
-#'
-#' # Panel of NDD-relevant genes
 #' query_atlas(c("NEFL", "GFAP", "TREM2", "NRGN", "VILIP1"))
-#'
-#' # Drop unknowns
 #' query_atlas(c("NEFL", "FAKEGENE"), missing = "drop")
 #' }
 #'
@@ -42,13 +40,14 @@ query_atlas <- function(genes,
   missing <- match.arg(missing)
 
   if (!is.character(genes) || length(genes) == 0L)
-    stop("`genes` must be a non-empty character vector of gene symbols.")
+    stop("`genes` must be a non-empty character vector of gene symbols.",
+         call. = FALSE)
 
-  genes <- unique(trimws(genes))
+  genes <- trimws(genes)
+  genes <- genes[!duplicated(toupper(genes))]
 
   if (is.null(atlas)) atlas <- .ensure_atlas()
 
-  # Match genes (case-insensitive)
   idx <- match(toupper(genes), toupper(atlas$gene_symbol))
   found <- !is.na(idx)
 
@@ -57,29 +56,16 @@ query_atlas <- function(genes,
             paste(head(genes[!found], 10), collapse = ", "),
             if (sum(!found) > 10) "..." else "")
 
-  # Build result from matched rows
-  result <- atlas[idx[found], , drop = FALSE]
-  result$found <- rep(TRUE, nrow(result))
-
-  if (any(!found) && missing != "drop") {
-    missing_df <- data.frame(
-      gene_symbol = genes[!found],
-      found       = FALSE,
-      stringsAsFactors = FALSE
-    )
-    # Fill atlas columns with NA
-    for (col in setdiff(names(atlas), "gene_symbol")) {
-      missing_df[[col]] <- NA
-    }
-    missing_df <- missing_df[, names(result), drop = FALSE]
-
-    # Interleave to preserve input order
-    out <- rbind(result, missing_df)
-    out <- out[order(match(toupper(out$gene_symbol), toupper(genes))), ,
-               drop = FALSE]
-    result <- out
+  if (missing == "drop") {
+    genes <- genes[found]
+    idx <- idx[found]
+    found <- found[found]
   }
 
+  # Indexing with NA yields an all-NA row of the right types, in input order.
+  result <- atlas[idx, , drop = FALSE]
+  result$gene_symbol[!found] <- genes[!found]
+  result$found <- found
   rownames(result) <- NULL
   result
 }
@@ -115,15 +101,65 @@ query_atlas <- function(genes,
 
 #' Look up genes in the tissue-resolved atlas
 #'
+#' Returns every (gene, tissue) row of the tissue-resolved atlas for the
+#' requested genes, optionally restricted to named tissues. Gene and tissue
+#' matching is case-insensitive.
+#'
 #' @param genes Character vector of HGNC gene symbols.
-#' @param tissues Character vector of tissue names, or NULL for all.
-#' @return Data frame filtered to matching gene-tissue pairs.
+#' @param tissues Character vector of atlas tissue names, or \code{NULL}
+#'   (default) for all 24. Unknown names are an error that lists the
+#'   vocabulary.
+#' @param missing Character. \code{"warn"} (default) prints a message naming
+#'   genes with no rows; \code{"silent"} does not.
+#'
+#' @return Data frame of matching rows, ordered by input gene then tissue.
+#'   Zero rows if nothing matches.
+#'
+#' @examples
+#' \dontrun{
+#' query_tissue("GFAP")
+#' query_tissue(c("NEFL", "GFAP"), tissues = c("Cerebral cortex", "Liver"))
+#' }
+#'
 #' @export
-query_tissue <- function(genes, tissues = NULL) {
+query_tissue <- function(genes, tissues = NULL, missing = c("warn", "silent")) {
+  missing <- match.arg(missing)
+  if (!is.character(genes) || length(genes) == 0L)
+    stop("`genes` must be a non-empty character vector of gene symbols.",
+         call. = FALSE)
   ta <- .ensure_tissue_atlas()
-  idx <- toupper(ta$gene_symbol) %in% toupper(genes)
+
+  genes <- trimws(genes)
+  genes <- genes[!duplicated(toupper(genes))]
+  gene_key <- toupper(genes)
+
+  keep <- toupper(ta$gene_symbol) %in% gene_key
+
   if (!is.null(tissues)) {
-    idx <- idx & ta$ts_tissue %in% tissues
+    if (!is.character(tissues) || length(tissues) == 0L)
+      stop("`tissues` must be a character vector or NULL.", call. = FALSE)
+    vocab <- unique(ta$ts_tissue)
+    hit <- match(tolower(trimws(tissues)), tolower(vocab))
+    if (anyNA(hit))
+      stop("Unknown tissue(s): ",
+           paste(tissues[is.na(hit)], collapse = ", "),
+           ". Available: ", paste(sort(vocab), collapse = ", "), ".",
+           call. = FALSE)
+    keep <- keep & ta$ts_tissue %in% vocab[hit]
   }
-  ta[idx, , drop = FALSE]
+
+  out <- ta[keep, , drop = FALSE]
+
+  if (missing == "warn") {
+    absent <- genes[!gene_key %in% toupper(out$gene_symbol)]
+    if (length(absent) > 0L)
+      message(length(absent), " gene(s) with no rows: ",
+              paste(head(absent, 10), collapse = ", "),
+              if (length(absent) > 10) "..." else "")
+  }
+
+  out <- out[order(match(toupper(out$gene_symbol), gene_key), out$ts_tissue), ,
+             drop = FALSE]
+  rownames(out) <- NULL
+  out
 }

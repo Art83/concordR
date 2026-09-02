@@ -4,16 +4,31 @@
 \alias{query_tissue}
 \title{Look up genes in the tissue-resolved atlas}
 \usage{
-query_tissue(genes, tissues = NULL)
+query_tissue(genes, tissues = NULL, missing = c("warn", "silent"))
 }
 \arguments{
 \item{genes}{Character vector of HGNC gene symbols.}
 
-\item{tissues}{Character vector of tissue names, or NULL for all.}
+\item{tissues}{Character vector of atlas tissue names, or \code{NULL}
+(default) for all 24. Unknown names are an error that lists the
+vocabulary.}
+
+\item{missing}{Character. \code{"warn"} (default) prints a message naming
+genes with no rows; \code{"silent"} does not.}
 }
 \value{
-Data frame filtered to matching gene-tissue pairs.
+Data frame of matching rows, ordered by input gene then tissue.
+Zero rows if nothing matches.
 }
 \description{
-Look up genes in the tissue-resolved atlas
+Returns every (gene, tissue) row of the tissue-resolved atlas for the
+requested genes, optionally restricted to named tissues. Gene and tissue
+matching is case-insensitive.
+}
+\examples{
+\dontrun{
+query_tissue("GFAP")
+query_tissue(c("NEFL", "GFAP"), tissues = c("Cerebral cortex", "Liver"))
+}
+
 }
