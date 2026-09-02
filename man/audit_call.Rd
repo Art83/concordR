@@ -21,29 +21,32 @@ A factor with levels \code{"accept"}, \code{"caution"},
 }
 \description{
 Combines the gate columns returned by \code{\link{triage}} into one call
-per gene.
+per gene. Decline means two or more independent lines contradict the
+claim, or one contradicts it outright. Accept means every gate supports
+it. Caution is everything else: the fluid measurement neither supports
+nor contradicts the claim.
 }
 \section{Rules}{
 
 A gene is \strong{declined} if any of the following holds: the tissue gate
-is \code{"mismatch"}; plausibility is \code{"implausible"} without
-\code{biofluid_rescue}; concordance is \code{"suppressed"}; the gene is
+is \code{"mismatch"}; concordance is \code{"suppressed"}; the gene is
 specific but none of its \code{primary_tissue} set is among
 \code{accept_tissues} when a context tissue was given; or the gene is
-absent from every layer
-(\code{"not_in_atlas"}, \code{"not_in_panel"}, and specificity
-\code{"na"}).
+absent from every layer (\code{"not_in_atlas"}, \code{"not_in_panel"},
+and specificity \code{"na"}).
 
 A gene is \strong{accepted} if it is not declined, concordance is
-\code{"concordant"}, plausibility is \code{"plausible"} or \code{"na"} or
-rescued, specificity is \code{"specific"}, and the tissue gate is either
-\code{"systemic_na"} or \code{"detected"} with an accepted tissue in the
-\code{primary_tissue} set.
+\code{"concordant"}, route is \code{"secreted"}, \code{"membrane"},
+\code{"matched"}, or \code{"na"}, specificity is \code{"specific"}, and
+the tissue gate is either \code{"systemic_na"} or \code{"detected"} with
+an accepted tissue in the \code{primary_tissue} set.
 
 Everything else is \strong{caution}. This includes
+\code{"intracellular"} route (the fluid level reports cell damage, which
+neither supports nor contradicts a target claim),
 \code{"suppressed_unconfirmed"}, \code{"variable"},
-\code{"low_expression"}, \code{"unknown"} plausibility, and
-\code{"broad"} specificity.
+\code{"low_expression"}, \code{"unknown"} route, and \code{"broad"},
+\code{"sparse"}, or \code{"na"} specificity.
 }
 
 \examples{

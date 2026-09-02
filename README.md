@@ -61,7 +61,7 @@ concordR audits inferential claims made from biofluid proteomics: plasma, CSF, u
 
 1. **Concordance** - does RNA reliably predict protein for this gene?
 2. **Tissue** - is the protein detected in the tissue the claim is about, by a vote across HPA IHC, GTEx MS, and PaxDb?
-3. **Biofluid plausibility** - is the protein's subcellular localisation consistent with the sample type, or is there a damage-release route?
+3. **Route** - how does the protein reach the sample? Secreted and shed proteins can carry a mechanism claim. Intracellular proteins reach a fluid by damage release, so their level reports that cells broke.
 4. **Specificity** - how tissue-specific is the protein at the cell-type level, and where is it made?
 
 Each gate is reported on its own. `audit_call()` and `funnel_class()` are the two supplied ways to combine them, and a user is free to write another.

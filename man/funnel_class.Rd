@@ -6,7 +6,7 @@
 \usage{
 funnel_class(
   df,
-  order = c("tissue", "biofluid_plausibility", "concordance", "specificity"),
+  order = c("tissue", "route", "concordance", "specificity"),
   accept_tissues = NULL,
   table = FALSE
 )
@@ -15,8 +15,8 @@ funnel_class(
 \item{df}{Data frame returned by \code{\link{triage}}.}
 
 \item{order}{Character vector naming the gates in funnel order. Any
-permutation of \code{"tissue"}, \code{"biofluid_plausibility"},
-\code{"concordance"}, \code{"specificity"}.}
+permutation of \code{"tissue"}, \code{"route"}, \code{"concordance"},
+\code{"specificity"}.}
 
 \item{accept_tissues}{As in \code{\link{audit_call}}.}
 

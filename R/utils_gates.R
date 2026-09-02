@@ -6,15 +6,18 @@
 # shipped atlas_thresholds object through .thresholds().
 # the idea is to let a user decide how to combine multiple gates without imposing a funnel.
 
-#' Sample type to the localisation flags that make a protein plausible there.
-#' NULL means the sample type has no plausibility rule (the gate reports "na").
+#' Sample types and their route rule. For biofluids the route gate reports
+#' how a protein reaches the fluid, from localisation alone: secreted,
+#' membrane (shed), or intracellular (damage release). For subcellular
+#' fractions it reports whether the protein's localisation matches the
+#' fraction. NULL means the sample type has no route rule ("na").
 #' @keywords internal
 #' @noRd
-.PLAUSIBLE_FLAGS <- list(
-  plasma = c("is_secreted", "is_membrane"),
-  serum = c("is_secreted", "is_membrane"),
-  csf = c("is_secreted", "is_membrane"),
-  urine = c("is_secreted", "is_membrane"),
+.ROUTE_RULES <- list(
+  plasma = "biofluid",
+  serum = "biofluid",
+  csf = "biofluid",
+  urine = "biofluid",
   cell_lysate = NULL,
   tissue = NULL,
   nuclear_fraction = c("is_nuclear"),
@@ -25,7 +28,7 @@
 #' All recognised sample types.
 #' @keywords internal
 #' @noRd
-.SAMPLE_TYPES <- names(.PLAUSIBLE_FLAGS)
+.SAMPLE_TYPES <- names(.ROUTE_RULES)
 
 #' Sample type to implied tissue, in the hpa_tissue namespace. NULL means
 #' systemic: no tissue is implied and the tissue gate reports "systemic_na"
@@ -45,12 +48,6 @@
   mitochondrial_fraction = NULL,
   membrane_fraction = NULL
 )
-
-#' Sample types where a projection-localised protein can reach the fluid by
-#' damage release (the NEFL pattern). Only these can earn biofluid_rescue.
-#' @keywords internal
-#' @noRd
-.RESCUE_TYPES <- c("plasma", "serum", "csf")
 
 #' Biofluids proper. In these, cellular proteomics under-detects secreted and
 #' projection proteins that have left the cell, so a suppressed call from the
@@ -181,7 +178,7 @@
 #' Joins on ensembl_id where the row has one, then falls back to a
 #' case-insensitive symbol match for rows without an ensembl_id or whose
 #' ensembl_id is absent from localisation_flags. Rows with no match keep NA
-#' in every is_* column, which the plausibility gate reads as "unknown".
+#' in every is_* column, which the route gate reads as "unknown".
 #'
 #' @param df Data frame with gene_symbol and, optionally, ensembl_id.
 #' @return \code{df} with the is_* columns appended (existing is_* columns are
@@ -217,40 +214,46 @@
 
 
 # -----------------------------------------------------------------------------
-# Biofluid plausibility gate
+# Route gate
 # -----------------------------------------------------------------------------
 
-#' Vectorised plausibility call across a data frame of genes.
+#' Route by which a protein reaches the sample, from localisation alone.
+#'
+#' Reads no other gate. Presence in a tissue is a separate fact and the
+#' combiners handle the conjunction.
 #'
 #' @param df Data frame with the is_* columns (one row per gene).
 #' @param sample_type Validated sample type.
-#' @return Character vector with values \code{"plausible"},
-#'   \code{"implausible"}, \code{"unknown"} (no localisation data or all
-#'   flags zero), or \code{"na"} (sample type has no plausibility rule).
+#' @return Character vector. For biofluids: \code{"secreted"},
+#'   \code{"membrane"}, \code{"intracellular"}, \code{"unknown"}. For
+#'   subcellular fractions: \code{"matched"}, \code{"unmatched"},
+#'   \code{"unknown"}. \code{"na"} for sample types with no route rule.
 #' @keywords internal
 #' @noRd
-.gate_plausibility <- function(df, sample_type) {
+.gate_route <- function(df, sample_type) {
   n <- nrow(df)
-  plausible_cols <- .PLAUSIBLE_FLAGS[[sample_type]]
-  if (is.null(plausible_cols)) return(rep("na", n))
+  rule <- .ROUTE_RULES[[sample_type]]
+  if (is.null(rule)) return(rep("na", n))
   if (n == 0L) return(character(0))
 
   loc_cols <- intersect(.LOC_COLS, names(df))
-  plaus_cols <- intersect(plausible_cols, names(df))
-  if (length(loc_cols) == 0L || length(plaus_cols) == 0L)
-    return(rep("unknown", n))
-
+  if (length(loc_cols) == 0L) return(rep("unknown", n))
   loc_mat <- as.matrix(df[, loc_cols, drop = FALSE])
   storage.mode(loc_mat) <- "numeric"
-  plaus_mat <- as.matrix(df[, plaus_cols, drop = FALSE])
-  storage.mode(plaus_mat) <- "numeric"
-
   has_any <- rowSums(loc_mat == 1, na.rm = TRUE) > 0
-  has_plausible <- rowSums(plaus_mat == 1, na.rm = TRUE) > 0
+  flag <- function(col) if (col %in% names(df)) !is.na(df[[col]]) & df[[col]] == 1
+                        else rep(FALSE, n)
 
   out <- rep("unknown", n)
-  out[has_any & has_plausible] <- "plausible"
-  out[has_any & !has_plausible] <- "implausible"
+  if (identical(rule, "biofluid")) {
+    out[has_any] <- "intracellular"
+    out[flag("is_membrane")] <- "membrane"
+    out[flag("is_secreted")] <- "secreted"
+  } else {
+    matched <- Reduce(`|`, lapply(rule, flag), init = rep(FALSE, n))
+    out[has_any & !matched] <- "unmatched"
+    out[matched] <- "matched"
+  }
   out
 }
 

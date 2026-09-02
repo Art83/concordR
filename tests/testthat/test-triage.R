@@ -4,14 +4,14 @@
 # them; if a test here fails after a rebuild, check the value against the
 # new data before changing the test.
 
-CORE <- c("gene_symbol", "concordance", "tissue", "biofluid_plausibility",
-          "biofluid_rescue", "specificity", "primary_tissue")
+CORE <- c("gene_symbol", "concordance", "tissue", "route",
+          "specificity", "primary_tissue")
 
 # -----------------------------------------------------------------------------
 # Shape
 # -----------------------------------------------------------------------------
 
-test_that("triage returns the seven core columns in input order", {
+test_that("triage returns the six core columns in input order", {
   res <- triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf")
   expect_s3_class(res, "data.frame")
   expect_named(res, CORE)
@@ -42,13 +42,12 @@ test_that("gate columns only ever take vocabulary values", {
   expect_true(all(res$tissue %in%
     c("systemic_na", "detected", "detected_1platform", "discordant",
       "mismatch", "insufficient_coverage", "not_in_panel")))
-  expect_true(all(res$biofluid_plausibility %in%
-    c("plausible", "implausible", "unknown", "na")))
-  expect_type(res$biofluid_rescue, "logical")
+  expect_true(all(res$route %in%
+    c("secreted", "membrane", "intracellular", "unknown", "na")))
   expect_true(all(res$specificity %in% c("specific", "broad", "sparse", "na")))
   expect_false(anyNA(res$concordance))
   expect_false(anyNA(res$tissue))
-  expect_false(anyNA(res$biofluid_plausibility))
+  expect_false(anyNA(res$route))
   expect_false(anyNA(res$specificity))
 })
 
@@ -56,31 +55,34 @@ test_that("gate columns only ever take vocabulary values", {
 # Known genes, CSF, no context tissue
 # -----------------------------------------------------------------------------
 
-test_that("NEFL in CSF: projection protein, implausible but rescued", {
+test_that("NEFL in CSF: intracellular, brain-specific", {
   res <- triage("NEFL", sample_type = "csf")
   expect_equal(res$concordance, "suppressed_unconfirmed")
   expect_equal(res$tissue, "systemic_na")
-  expect_equal(res$biofluid_plausibility, "implausible")
-  expect_true(res$biofluid_rescue)
+  expect_equal(res$route, "intracellular")
   expect_equal(res$specificity, "specific")
   expect_equal(res$primary_tissue, "Cerebral cortex, Hippocampus")
 })
 
-test_that("GFAP in CSF: implausible, not projection, no rescue", {
+test_that("GFAP in CSF: intracellular, specific", {
   res <- triage("GFAP", sample_type = "csf")
   expect_equal(res$concordance, "variable")
-  expect_equal(res$biofluid_plausibility, "implausible")
-  expect_false(res$biofluid_rescue)
+  expect_equal(res$route, "intracellular")
   expect_equal(res$specificity, "specific")
   # HPA scores GFAP High in cerebellum and placenta. The set reports both.
   expect_equal(res$primary_tissue, "Cerebellum, Placenta")
 })
 
+test_that("secreted and membrane routes are read from the flags", {
+  res <- triage(c("ALB", "APP"), sample_type = "csf")
+  expect_equal(res$route[1], "secreted")
+  expect_true(res$route[2] %in% c("secreted", "membrane"))
+})
+
 test_that("SPANXA1 in CSF: absent from localisation flags reads unknown, one IHC hit reads sparse", {
   res <- triage("SPANXA1", sample_type = "csf")
   expect_equal(res$concordance, "low_expression")
-  expect_equal(res$biofluid_plausibility, "unknown")
-  expect_false(res$biofluid_rescue)
+  expect_equal(res$route, "unknown")
   # One IHC detection (Testis), bulk detects it in 1 of 12 covered tissues:
   # restriction is consistent across platforms but the evidence is thin.
   expect_equal(res$specificity, "sparse")
@@ -109,15 +111,9 @@ test_that("context_tissue switches the tissue gate on", {
   # Other gates unchanged by the context
   base <- triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf")
   expect_equal(res$concordance, base$concordance)
-  expect_equal(res$biofluid_plausibility, base$biofluid_plausibility)
+  expect_equal(res$route, base$route)
   expect_equal(res$specificity, base$specificity)
   expect_equal(res$primary_tissue, base$primary_tissue)
-})
-
-test_that("rescue requires presence when a context tissue is given", {
-  # NEFL is present in cortex, so rescue survives the context
-  res <- triage("NEFL", sample_type = "csf", context_tissue = "Cerebral cortex")
-  expect_true(res$biofluid_rescue)
 })
 
 test_that("context_tissue is case-insensitive and canonicalised", {
@@ -152,17 +148,23 @@ test_that("urine implies Kidney", {
 # Sample types
 # -----------------------------------------------------------------------------
 
-test_that("tissue and cell_lysate have no plausibility rule", {
+test_that("tissue and cell_lysate have no route rule", {
   res <- triage("NEFL", sample_type = "tissue")
-  expect_equal(res$biofluid_plausibility, "na")
-  expect_true(is.na(res$biofluid_rescue))
+  expect_equal(res$route, "na")
   res <- triage("NEFL", sample_type = "cell_lysate")
-  expect_equal(res$biofluid_plausibility, "na")
+  expect_equal(res$route, "na")
 })
 
-test_that("rescue never fires outside plasma, serum, csf", {
-  res <- triage("NEFL", sample_type = "urine")
-  expect_false(res$biofluid_rescue)
+test_that("subcellular fractions report matched or unmatched", {
+  # NEFL is cytoskeletal, not nuclear
+  res <- triage("NEFL", sample_type = "nuclear_fraction")
+  expect_equal(res$route, "unmatched")
+  # HDAC1 is nuclear
+  res <- triage("HDAC1", sample_type = "nuclear_fraction")
+  expect_equal(res$route, "matched")
+  # Unknown localisation stays unknown in any fraction
+  res <- triage("SPANXA1", sample_type = "nuclear_fraction")
+  expect_equal(res$route, "unknown")
 })
 
 test_that("sample_type is validated", {
@@ -186,7 +188,7 @@ test_that("a gene absent from every layer reads not_in_atlas, not_in_panel, na",
                 context_tissue = "Cerebral cortex")
   expect_equal(res$concordance, "not_in_atlas")
   expect_equal(res$tissue, "not_in_panel")
-  expect_equal(res$biofluid_plausibility, "unknown")
+  expect_equal(res$route, "unknown")
   expect_equal(res$specificity, "na")
   expect_true(is.na(res$primary_tissue))
 })

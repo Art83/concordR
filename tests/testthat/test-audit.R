@@ -9,11 +9,10 @@ mk <- function(...) {
 }
 
 full <- function(gene, concordance = "concordant", tissue = "detected",
-                 plaus = "plausible", rescue = FALSE, spec = "specific",
+                 route = "secreted", spec = "specific",
                  primary = "Cerebral cortex") {
   mk(gene_symbol = gene, concordance = concordance, tissue = tissue,
-     biofluid_plausibility = plaus, biofluid_rescue = rescue,
-     specificity = spec, primary_tissue = primary)
+     route = route, specificity = spec, primary_tissue = primary)
 }
 
 # -----------------------------------------------------------------------------
@@ -22,11 +21,11 @@ full <- function(gene, concordance = "concordant", tissue = "detected",
 
 test_that("audit_call accepts a gene that passes every gate", {
   expect_equal(as.character(audit_call(full("A"))), "accept")
+  expect_equal(as.character(audit_call(full("A", route = "membrane"))), "accept")
 })
 
 test_that("audit_call declines on each decline rule", {
   expect_equal(as.character(audit_call(full("A", tissue = "mismatch"))), "decline")
-  expect_equal(as.character(audit_call(full("A", plaus = "implausible"))), "decline")
   expect_equal(as.character(audit_call(full("A", concordance = "suppressed"))), "decline")
   expect_equal(as.character(audit_call(full("A", primary = "Liver"))), "decline")
   expect_equal(as.character(audit_call(full("A", concordance = "not_in_atlas",
@@ -34,13 +33,15 @@ test_that("audit_call declines on each decline rule", {
                                             primary = NA))), "decline")
 })
 
-test_that("rescue converts implausible from decline to not-decline", {
-  res <- audit_call(full("A", plaus = "implausible", rescue = TRUE))
-  expect_equal(as.character(res), "accept")
+test_that("intracellular route is caution, never decline on its own", {
+  expect_equal(as.character(audit_call(full("A", route = "intracellular"))), "caution")
+  # With a tissue mismatch it declines, on the mismatch
+  expect_equal(as.character(audit_call(full("A", route = "intracellular",
+                                            tissue = "mismatch"))), "decline")
 })
 
-test_that("plausibility na passes for sample types with no rule", {
-  df <- full("A", plaus = "na", rescue = NA)
+test_that("route na passes for sample types with no rule", {
+  df <- full("A", route = "na")
   attr(df, "triage_context")$sample_type <- "tissue"
   expect_equal(as.character(audit_call(df)), "accept")
 })
@@ -49,7 +50,8 @@ test_that("caution for the intermediate values", {
   expect_equal(as.character(audit_call(full("A", concordance = "suppressed_unconfirmed"))), "caution")
   expect_equal(as.character(audit_call(full("A", concordance = "variable"))), "caution")
   expect_equal(as.character(audit_call(full("A", concordance = "low_expression"))), "caution")
-  expect_equal(as.character(audit_call(full("A", plaus = "unknown"))), "caution")
+  expect_equal(as.character(audit_call(full("A", route = "unknown"))), "caution")
+  expect_equal(as.character(audit_call(full("A", route = "unmatched"))), "caution")
   expect_equal(as.character(audit_call(full("A", spec = "broad", primary = "multiple"))), "caution")
   expect_equal(as.character(audit_call(full("A", spec = "sparse", primary = NA))), "caution")
   expect_equal(as.character(audit_call(full("A", spec = "na", primary = NA))), "caution")
@@ -100,12 +102,12 @@ test_that("funnel_class reports the first failing gate in the stated order", {
   df <- full("A", tissue = "mismatch", concordance = "suppressed")
   expect_equal(as.character(funnel_class(df)), "tissue")
   expect_equal(as.character(funnel_class(df,
-    order = c("concordance", "tissue", "biofluid_plausibility", "specificity"))),
+    order = c("concordance", "tissue", "route", "specificity"))),
     "concordance")
 })
 
 test_that("funnel_class levels are the order followed by pass", {
-  ord <- c("specificity", "concordance", "tissue", "biofluid_plausibility")
+  ord <- c("specificity", "concordance", "tissue", "route")
   res <- funnel_class(full("A"), order = ord)
   expect_equal(levels(res), c(ord, "pass"))
   expect_equal(as.character(res), "pass")
@@ -121,14 +123,13 @@ test_that("funnel_class validates order", {
 test_that("funnel_class table has one row per stage and conserves counts", {
   df <- rbind(full("A"),
               full("B", tissue = "mismatch"),
-              full("C", plaus = "implausible"),
+              full("C", route = "intracellular"),
               full("D", concordance = "variable"),
               full("E", spec = "broad", primary = "multiple"))
   attr(df, "triage_context") <- attr(full("A"), "triage_context")
   tab <- funnel_class(df, table = TRUE)
   expect_equal(nrow(tab), 4L)
-  expect_equal(tab$stage, c("tissue", "biofluid_plausibility",
-                            "concordance", "specificity"))
+  expect_equal(tab$stage, c("tissue", "route", "concordance", "specificity"))
   expect_equal(tab$n_entering[1], 5L)
   expect_equal(tab$n_failed, c(1L, 1L, 1L, 1L))
   expect_equal(tab$n_surviving[4], 1L)
@@ -147,8 +148,8 @@ test_that("funnel pass equals audit accept on real triage output", {
     a <- audit_call(res) == "accept"
     p <- funnel_class(res) == "pass"
     expect_equal(p, a, info = paste("context:", if (is.null(ctx)) "NULL" else ctx))
-    for (ord in list(c("concordance", "specificity", "tissue", "biofluid_plausibility"),
-                     c("specificity", "biofluid_plausibility", "concordance", "tissue"))) {
+    for (ord in list(c("concordance", "specificity", "tissue", "route"),
+                     c("specificity", "route", "concordance", "tissue"))) {
       expect_equal(funnel_class(res, order = ord) == "pass", a)
     }
   }

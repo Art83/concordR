@@ -32,16 +32,16 @@
 #'     (two or more voters, all absent), \code{"insufficient_coverage"}
 #'     (one voter, absent), \code{"not_in_panel"} (no row), or
 #'     \code{"systemic_na"} (no tissue implied and none supplied).}
-#'   \item{\code{biofluid_plausibility}}{Whether the protein's subcellular
-#'     localisation (UniProt) is consistent with the sample type.
-#'     \code{"plausible"}, \code{"implausible"}, \code{"unknown"} (no
-#'     localisation data), or \code{"na"} (sample type has no rule).}
-#'   \item{\code{biofluid_rescue}}{Logical. \code{TRUE} when plausibility is
-#'     \code{"implausible"} but the protein is projection-localised, the
-#'     sample is plasma, serum, or CSF, and either no context tissue was
-#'     given or the tissue gate finds the protein present there. This is
-#'     the damage-release route (the NEFL pattern). \code{NA} when
-#'     plausibility is \code{"na"}.}
+#'   \item{\code{route}}{How the protein reaches the sample, from UniProt
+#'     localisation alone. For biofluids: \code{"secreted"} (fluid level
+#'     can track regulated production), \code{"membrane"} (shed; tracks
+#'     surface expression and protease activity), \code{"intracellular"}
+#'     (damage release; the fluid level reports that cells broke, not what
+#'     the protein does), or \code{"unknown"} (no localisation data). For
+#'     subcellular fractions: \code{"matched"}, \code{"unmatched"},
+#'     \code{"unknown"}. \code{"na"} for tissue and cell lysate. Whether
+#'     an intracellular protein is present in the claimed tissue is the
+#'     tissue gate's fact; the combiners handle the conjunction.}
 #'   \item{\code{specificity}}{Protein-level tissue specificity from the HPA
 #'     IHC panel. \code{"specific"} when protein tau (highest IHC level in
 #'     any cell type, per tissue, across every tissue HPA stained) is at or
@@ -77,15 +77,16 @@
 #'   about. Overrides automatic inference.
 #' @param details Logical. When \code{TRUE}, append the evidence behind each
 #'   gate (\code{ensembl_id}, \code{gene_class}, \code{protein_confidence},
-#'   \code{suppression_rate}, \code{tau}, \code{protein_breadth},
-#'   \code{localisation}, \code{n_platforms_context},
-#'   \code{mechanism_tier}). Default \code{FALSE}.
+#'   \code{suppression_rate}, \code{protein_tau}, IHC and bulk detection
+#'   counts, \code{tau}, \code{protein_breadth}, \code{localisation},
+#'   \code{n_platforms_context}, \code{mechanism_tier}). Default
+#'   \code{FALSE}.
 #'
-#' @return A data frame with one row per input gene, in input order. Seven
+#' @return A data frame with one row per input gene, in input order. Six
 #'   columns by default: \code{gene_symbol}, \code{concordance},
-#'   \code{tissue}, \code{biofluid_plausibility}, \code{biofluid_rescue},
-#'   \code{specificity}, \code{primary_tissue}. The resolved sample type and
-#'   context tissue are stored in the \code{"triage_context"} attribute.
+#'   \code{tissue}, \code{route}, \code{specificity},
+#'   \code{primary_tissue}. The resolved sample type and context tissue are
+#'   stored in the \code{"triage_context"} attribute.
 #'
 #' @examples
 #' \dontrun{
@@ -144,9 +145,8 @@ triage <- function(genes, sample_type, context_tissue = NULL,
   concordance <- .gate_concordance(q, sample_type, tis$n_platforms,
                                    cross_agree, thr)
 
-  # --- Gate: biofluid plausibility and rescue ---
-  plaus <- .gate_plausibility(q, sample_type)
-  rescue <- .gate_rescue(q, plaus, tis$call, sample_type)
+  # --- Gate: route ---
+  route <- .gate_route(q, sample_type)
 
   # --- Gate: specificity and primary tissue ---
   spec <- .gate_specificity(q, thr)
@@ -157,8 +157,7 @@ triage <- function(genes, sample_type, context_tissue = NULL,
     gene_symbol = q$gene_symbol,
     concordance = concordance,
     tissue = tis$call,
-    biofluid_plausibility = plaus,
-    biofluid_rescue = rescue,
+    route = route,
     specificity = spec,
     primary_tissue = primary,
     stringsAsFactors = FALSE
@@ -206,11 +205,6 @@ triage <- function(genes, sample_type, context_tissue = NULL,
   concordant_absent = "mismatch",
   insufficient_coverage = "insufficient_coverage"
 )
-
-#' Tissue gate values that count as the protein being present.
-#' @keywords internal
-#' @noRd
-.TISSUE_PRESENT <- c("detected", "detected_1platform", "discordant")
 
 #' Look up each gene's presence vote in one tissue.
 #'
@@ -298,28 +292,6 @@ triage <- function(genes, sample_type, context_tissue = NULL,
                   !is.na(n_platforms) & n_platforms >= thr$n_platforms_min
 
   out[suppressed & (blind | contradicted)] <- "suppressed_unconfirmed"
-  out
-}
-
-
-# =============================================================================
-# Gate: biofluid rescue
-# =============================================================================
-
-#' @keywords internal
-#' @noRd
-.gate_rescue <- function(q, plaus, tissue_call, sample_type) {
-  n <- nrow(q)
-  out <- rep(FALSE, n)
-  out[plaus == "na"] <- NA
-
-  if (!sample_type %in% .RESCUE_TYPES) return(out)
-
-  is_proj <- if ("is_projection" %in% names(q))
-    !is.na(q$is_projection) & q$is_projection == 1 else rep(FALSE, n)
-  present <- tissue_call == "systemic_na" | tissue_call %in% .TISSUE_PRESENT
-
-  out[plaus == "implausible" & is_proj & present] <- TRUE
   out
 }
 

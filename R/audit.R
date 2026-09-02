@@ -9,28 +9,31 @@
 #' Accept, caution, or decline from triage gates
 #'
 #' Combines the gate columns returned by \code{\link{triage}} into one call
-#' per gene.
+#' per gene. Decline means two or more independent lines contradict the
+#' claim, or one contradicts it outright. Accept means every gate supports
+#' it. Caution is everything else: the fluid measurement neither supports
+#' nor contradicts the claim.
 #'
 #' @section Rules:
 #' A gene is \strong{declined} if any of the following holds: the tissue gate
-#' is \code{"mismatch"}; plausibility is \code{"implausible"} without
-#' \code{biofluid_rescue}; concordance is \code{"suppressed"}; the gene is
+#' is \code{"mismatch"}; concordance is \code{"suppressed"}; the gene is
 #' specific but none of its \code{primary_tissue} set is among
 #' \code{accept_tissues} when a context tissue was given; or the gene is
-#' absent from every layer
-#' (\code{"not_in_atlas"}, \code{"not_in_panel"}, and specificity
-#' \code{"na"}).
+#' absent from every layer (\code{"not_in_atlas"}, \code{"not_in_panel"},
+#' and specificity \code{"na"}).
 #'
 #' A gene is \strong{accepted} if it is not declined, concordance is
-#' \code{"concordant"}, plausibility is \code{"plausible"} or \code{"na"} or
-#' rescued, specificity is \code{"specific"}, and the tissue gate is either
-#' \code{"systemic_na"} or \code{"detected"} with an accepted tissue in the
-#' \code{primary_tissue} set.
+#' \code{"concordant"}, route is \code{"secreted"}, \code{"membrane"},
+#' \code{"matched"}, or \code{"na"}, specificity is \code{"specific"}, and
+#' the tissue gate is either \code{"systemic_na"} or \code{"detected"} with
+#' an accepted tissue in the \code{primary_tissue} set.
 #'
 #' Everything else is \strong{caution}. This includes
+#' \code{"intracellular"} route (the fluid level reports cell damage, which
+#' neither supports nor contradicts a target claim),
 #' \code{"suppressed_unconfirmed"}, \code{"variable"},
-#' \code{"low_expression"}, \code{"unknown"} plausibility, and
-#' \code{"broad"} specificity.
+#' \code{"low_expression"}, \code{"unknown"} route, and \code{"broad"},
+#' \code{"sparse"}, or \code{"na"} specificity.
 #'
 #' @param df Data frame returned by \code{\link{triage}}.
 #' @param accept_tissues Character vector of HPA tissue names. A specific
@@ -55,11 +58,9 @@
 audit_call <- function(df, accept_tissues = NULL) {
   .check_triage_df(df)
   accept_tissues <- .resolve_accept_tissues(df, accept_tissues)
+  pass <- .gate_pass_matrix(df, accept_tissues)
 
-  rescued <- df$biofluid_rescue %in% TRUE
-  plaus_ok <- df$biofluid_plausibility %in% c("plausible", "na") | rescued
   systemic <- df$tissue == "systemic_na"
-
   primary_ok <- .primary_in(df$primary_tissue, accept_tissues)
 
   wrong_tissue <- !systemic & df$specificity == "specific" &
@@ -71,16 +72,11 @@ audit_call <- function(df, accept_tissues = NULL) {
                 df$specificity == "na"
 
   decline <- df$tissue == "mismatch" |
-             (df$biofluid_plausibility == "implausible" & !rescued) |
              df$concordance == "suppressed" |
              wrong_tissue |
              no_support
 
-  accept <- !decline &
-            df$concordance == "concordant" &
-            plaus_ok &
-            df$specificity == "specific" &
-            (systemic | (df$tissue == "detected" & primary_ok))
+  accept <- !decline & apply(pass, 1L, all)
 
   factor(ifelse(decline, "decline", ifelse(accept, "accept", "caution")),
          levels = c("accept", "caution", "decline"))
@@ -98,8 +94,8 @@ audit_call <- function(df, accept_tissues = NULL) {
 #'
 #' @param df Data frame returned by \code{\link{triage}}.
 #' @param order Character vector naming the gates in funnel order. Any
-#'   permutation of \code{"tissue"}, \code{"biofluid_plausibility"},
-#'   \code{"concordance"}, \code{"specificity"}.
+#'   permutation of \code{"tissue"}, \code{"route"}, \code{"concordance"},
+#'   \code{"specificity"}.
 #' @param accept_tissues As in \code{\link{audit_call}}.
 #' @param table Logical. When \code{TRUE}, return the survivor table (one
 #'   row per stage with genes entering, failing, and surviving) instead of
@@ -120,12 +116,11 @@ audit_call <- function(df, accept_tissues = NULL) {
 #' @seealso \code{\link{triage}}, \code{\link{audit_call}}
 #' @export
 funnel_class <- function(df,
-                         order = c("tissue", "biofluid_plausibility",
-                                   "concordance", "specificity"),
+                         order = c("tissue", "route", "concordance", "specificity"),
                          accept_tissues = NULL,
                          table = FALSE) {
   .check_triage_df(df)
-  gates <- c("tissue", "biofluid_plausibility", "concordance", "specificity")
+  gates <- c("tissue", "route", "concordance", "specificity")
   if (!is.character(order) || length(order) != 4L || !setequal(order, gates))
     stop("`order` must be a permutation of: ", paste(gates, collapse = ", "),
          ".", call. = FALSE)
@@ -158,9 +153,13 @@ funnel_class <- function(df,
 
 #' @keywords internal
 #' @noRd
-.TRIAGE_COLS <- c("gene_symbol", "concordance", "tissue",
-                  "biofluid_plausibility", "biofluid_rescue",
+.TRIAGE_COLS <- c("gene_symbol", "concordance", "tissue", "route",
                   "specificity", "primary_tissue")
+
+#' Route values that let the fluid level speak to the claim.
+#' @keywords internal
+#' @noRd
+.ROUTE_PASS <- c("secreted", "membrane", "matched", "na")
 
 #' @keywords internal
 #' @noRd
@@ -207,14 +206,12 @@ funnel_class <- function(df,
 #' @keywords internal
 #' @noRd
 .gate_pass_matrix <- function(df, accept_tissues) {
-  rescued  <- df$biofluid_rescue %in% TRUE
   systemic <- df$tissue == "systemic_na"
   primary_ok <- .primary_in(df$primary_tissue, accept_tissues)
 
   cbind(
     tissue = systemic | df$tissue == "detected",
-    biofluid_plausibility = df$biofluid_plausibility %in% c("plausible", "na") |
-                            rescued,
+    route = df$route %in% .ROUTE_PASS,
     concordance = df$concordance == "concordant",
     specificity = df$specificity == "specific" & (systemic | primary_ok)
   )

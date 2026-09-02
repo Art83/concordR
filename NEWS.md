@@ -5,10 +5,9 @@ gate changes definition.
 
 ## triage()
 
-* Returns one column per gate and no verdict. Seven columns by default:
-  `gene_symbol`, `concordance`, `tissue`, `biofluid_plausibility`,
-  `biofluid_rescue`, `specificity`, `primary_tissue`. `details = TRUE`
-  appends the evidence behind each gate.
+* Returns one column per gate and no verdict. Six columns by default:
+  `gene_symbol`, `concordance`, `tissue`, `route`, `specificity`,
+  `primary_tissue`. `details = TRUE` appends the evidence behind each gate.
 * `verdict` and `reason` columns removed.
 * Each gate is a function of the atlas data and the sample type only. No
   gate reads another gate's result.
@@ -16,8 +15,21 @@ gate changes definition.
   (HPA IHC, GTEx MS, PaxDb) over 59 tissues. `context_tissue` is validated
   against that vocabulary. In 0.1.0 the vote was shipped but not read.
 * Localisation flags are joined at run time by `ensembl_id` with symbol
-  fallback. In 0.1.0 the join was missing, so the plausibility gate and
-  the damage-release rescue never fired.
+  fallback. In 0.1.0 the join was missing, so the localisation gate never
+  fired.
+* The localisation gate is `route`: how the protein reaches the sample,
+  from UniProt alone. `secreted`, `membrane`, `intracellular`, `unknown`
+  for biofluids; `matched`, `unmatched`, `unknown` for subcellular
+  fractions; `na` for tissue and lysate. The 0.1.0 gate asked whether a
+  protein was "plausible" in a fluid, and the CSF data answered that
+  everything is: a thousand intracellular proteins are in the CSF
+  proteome. "Implausible" was intracellular plus not present in the
+  tissue, a conjunction of two gates, which is why the gate had to read
+  tissue data and needed a rescue for projection proteins. The route gate
+  is independent, the rescue column is gone, and `audit_call()` handles
+  the conjunction: intracellular is caution (the fluid level reports cell
+  damage, which neither supports nor contradicts a target claim),
+  intracellular with a tissue mismatch is a decline on the mismatch.
 * The specificity gate is protein-level. It reads a tau computed over the
   highest IHC level per tissue across the HPA panel. RNA tau and protein
   breadth are shipped as evidence only. In
