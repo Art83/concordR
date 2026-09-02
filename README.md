@@ -1,3 +1,15 @@
+## Reproducing the manuscript
+
+The analysis in Finney and Shvetcov (2026) was run with concordR version
+0.1.1, tagged `v0.1.1` on the `paper` branch. Install that exact version with
+
+    remotes::install_github("Art83/concordR@v0.1.1")
+
+The `main` branch carries later development and its outputs differ from
+the published numbers. The audit script that produced the manuscript tables
+lives in the companion repository `hpa_to_tabula`.
+
+
 # concordR: QC for biofluid proteomics in NDD
 
 
