@@ -1,3 +1,17 @@
+# Reproducing the manuscript
+
+The analysis in Finney and Shvetcov (2026) was run with concordR version
+0.1.1, tagged `v0.1.1` on the `paper` branch. Install that exact version with
+
+    remotes::install_github("Art83/concordR@v0.1.1")
+
+This branch carries later development. Version 0.2.0 and later replace the
+rank-based specificity gate with log-mean tau and score specificity at the
+protein level, so their outputs differ from the published numbers. The audit
+script that produced the manuscript tables lives in the companion repository
+`hpa_to_tabula`
+
+
 # concordR: QC for biofluid proteomics in NDD
 
 
