@@ -14,8 +14,7 @@ atlas_thresholds <- list(
   bulk_breadth_ihc_uninformative = 0.5, # bulk-detected share of covered tissues at or above which a sparse-IHC gene reads na
   tau_specific = 0.85,           # evidence only, RNA log-mean tau
   protein_breadth_broad = 0.75,  # evidence only, coverage-confounded
-  cross_platform_agree_max = 0.30,
-  n_platforms_min = 2L
+  n_platforms_min = 2L           # bulk voters detecting a suppressed gene in the context tissue before GTEx disagreement counts
 )
 
 # ---- Sanity ------------------------------------------------------------------
@@ -30,8 +29,6 @@ stopifnot(
   atlas_thresholds$tau_specific > 0, atlas_thresholds$tau_specific < 1,
   atlas_thresholds$protein_breadth_broad > 0,
   atlas_thresholds$protein_breadth_broad <= 1,
-  atlas_thresholds$cross_platform_agree_max >= 0,
-  atlas_thresholds$cross_platform_agree_max <= 1,
   atlas_thresholds$n_platforms_min >= 1L
 )
 

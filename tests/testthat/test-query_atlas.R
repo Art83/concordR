@@ -98,3 +98,30 @@ test_that("query_tissue orders by input gene then tissue and reports absent gene
   expect_equal(g$ts_tissue, sort(g$ts_tissue))
   expect_silent(query_tissue(c("GFAP", "FAKEGENE_XYZ"), missing = "silent"))
 })
+
+test_that("query_presence returns the vote across the HPA panel", {
+  res <- query_presence("NEFL")
+  expect_true(all(c("gene_symbol", "tissue", "verdict", "n_detected",
+                    "seen_by") %in% names(res)))
+  expect_true(nrow(res) > 24L)
+  expect_true(all(res$verdict %in% c("detected", "detected_by_one",
+                                     "discordant", "concordant_absent",
+                                     "insufficient_coverage")))
+  expect_equal(res$tissue, sort(res$tissue))
+})
+
+test_that("query_presence filters tissues, case-insensitive, and agrees with the tissue gate", {
+  res <- query_presence(c("NEFL", "GFAP"),
+                        tissues = c("cerebral cortex", "Liver"))
+  expect_setequal(unique(res$tissue), c("Cerebral cortex", "Liver"))
+  expect_equal(unique(res$gene_symbol), c("NEFL", "GFAP"))
+  cortex <- res[res$tissue == "Cerebral cortex", ]
+  gate <- triage(c("NEFL", "GFAP"), sample_type = "csf",
+                 context_tissue = "Cerebral cortex")
+  map <- c(detected = "detected", detected_by_one = "detected_1platform",
+           discordant = "discordant", concordant_absent = "mismatch",
+           insufficient_coverage = "insufficient_coverage")
+  expect_equal(unname(map[cortex$verdict]), gate$tissue)
+  expect_error(query_presence("NEFL", tissues = "Mars"), "not found")
+  expect_error(query_presence("NEFL", tissues = "Brain"), "regions")
+})

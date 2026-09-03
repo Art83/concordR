@@ -163,3 +163,73 @@ query_tissue <- function(genes, tissues = NULL, missing = c("warn", "silent")) {
   rownames(out) <- NULL
   out
 }
+
+
+#' Look up protein presence votes across the HPA tissue panel
+#'
+#' Returns the three-source presence vote (HPA IHC, GTEx MS, PaxDb) for
+#' the requested genes across the 59 HPA tissues. This is the object the
+#' tissue gate of \code{\link{triage}} reads, exposed so a user can see
+#' every tissue at once rather than one context at a time. Gene and tissue
+#' matching is case-insensitive. Tissue names are HPA names.
+#'
+#' @param genes Character vector of HGNC gene symbols.
+#' @param tissues Character vector of HPA tissue names, or \code{NULL}
+#'   (default) for all 59. Unknown names are an error that lists the
+#'   vocabulary.
+#' @param missing Character. \code{"warn"} (default) prints a message naming
+#'   genes with no rows; \code{"silent"} does not.
+#'
+#' @return Data frame with one row per (gene, tissue), ordered by input
+#'   gene then tissue. Columns: \code{gene_symbol}, \code{ensembl_id},
+#'   \code{tissue}, \code{verdict} (the vote), \code{n_detected},
+#'   \code{n_absent}, \code{n_voters}, \code{seen_by}, and the per-source
+#'   calls \code{ihc_level}, \code{gtex_call}, \code{paxdb_call}.
+#'
+#' @examples
+#' \dontrun{
+#' query_presence("NEFL")
+#' query_presence(c("NEFL", "GFAP"),
+#'                tissues = c("Cerebral cortex", "Hippocampus", "Liver"))
+#' }
+#'
+#' @seealso \code{\link{triage}}, \code{\link{query_tissue}}
+#' @export
+query_presence <- function(genes, tissues = NULL, missing = c("warn", "silent")) {
+  missing <- match.arg(missing)
+  if (!is.character(genes) || length(genes) == 0L)
+    stop("`genes` must be a non-empty character vector of gene symbols.",
+         call. = FALSE)
+  hpa <- .ensure_hpa_tissue()
+  if (is.null(hpa))
+    stop("hpa_tissue not found in package data.", call. = FALSE)
+
+  genes <- trimws(genes)
+  genes <- genes[!duplicated(toupper(genes))]
+  gene_key <- toupper(genes)
+
+  keep <- !is.na(hpa$gene_symbol) & toupper(hpa$gene_symbol) %in% gene_key
+
+  if (!is.null(tissues)) {
+    tissues <- .validate_context_tissue(tissues, unique(hpa$tissue))
+    keep <- keep & hpa$tissue %in% tissues
+  }
+
+  cols <- intersect(c("gene_symbol", "ensembl_id", "tissue", "verdict",
+                      "n_detected", "n_absent", "n_voters", "seen_by",
+                      "ihc_level", "gtex_call", "paxdb_call"), names(hpa))
+  out <- hpa[keep, cols, drop = FALSE]
+
+  if (missing == "warn") {
+    absent <- genes[!gene_key %in% toupper(out$gene_symbol)]
+    if (length(absent) > 0L)
+      message(length(absent), " gene(s) with no rows: ",
+              paste(head(absent, 10), collapse = ", "),
+              if (length(absent) > 10) "..." else "")
+  }
+
+  out <- out[order(match(toupper(out$gene_symbol), gene_key), out$tissue), ,
+             drop = FALSE]
+  rownames(out) <- NULL
+  out
+}

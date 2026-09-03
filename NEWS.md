@@ -52,7 +52,10 @@ gate changes definition.
   uninformative and the gene reads `"na"`; otherwise the restriction is
   consistent across platforms but thin and the gene reads `"sparse"`.
   Both get `primary_tissue = NA`, so a single antibody hit can no longer
-  produce a wrong-tissue decline.
+  produce a wrong-tissue decline. Later revised: sparse genes report their
+  tied-max set in `primary_tissue` so the caution is readable (UMOD in
+  urine reads `sparse | Kidney`), and `audit_call()` declines on the set
+  only for specific genes.
 * The word "compartment" no longer appears in the interface.
 
 ## New functions
@@ -62,12 +65,24 @@ gate changes definition.
 * `funnel_class()`: first-failure partition in a stated gate order, with an
   optional survivor table. `funnel_class(x) == "pass"` is identical to
   `audit_call(x) == "accept"`.
+* `query_presence()`: the three-source presence vote for a gene list
+  across the 59 HPA tissues, which is what the tissue gate reads.
+
+## Vectorised context
+
+* `triage()` accepts several `context_tissue` values. The output is then
+  long, one row per gene per tissue, with a `context_tissue` column after
+  `gene_symbol`. `audit_call()` and `funnel_class()` read each row's own
+  context. Only the tissue gate and the cross-platform clause of
+  concordance vary with context; the rest repeat.
 
 ## Data
 
 * `atlas_thresholds` shipped as internal data. Every threshold `triage()`
   uses is read from it, and `data-raw/derive_thresholds.R` is the single
-  place to change one.
+  place to change one. `cross_platform_agree_max` from 0.1.0 is removed:
+  with a single context tissue the quantity it compared against was a
+  boolean, so the clause now reads `platforms_agree == FALSE` directly.
 * `concordance_atlas` gains `tau`, `protein_breadth`, `protein_tau`,
   `primary_tissue_ihc`, `n_primary_tissues`, `n_tissues_ihc`,
   `n_tissues_ihc_detected`,

@@ -39,8 +39,10 @@
 #' @param accept_tissues Character vector of HPA tissue names. A specific
 #'   gene passes the tissue check if any tissue in its \code{primary_tissue}
 #'   set is in this vector. Default \code{NULL} derives it from the context
-#'   tissue stored in \code{df}, expanded to all brain regions when the
-#'   context is one of them. Ignored when no context tissue was given.
+#'   tissue, per row when \code{df} has a \code{context_tissue} column and
+#'   from the \code{triage_context} attribute otherwise, expanded to all
+#'   brain regions when the context is one of them. Ignored when no context
+#'   tissue was given.
 #'
 #' @return A factor with levels \code{"accept"}, \code{"caution"},
 #'   \code{"decline"}, one element per row of \code{df}.
@@ -174,31 +176,42 @@ funnel_class <- function(df,
 }
 
 #' Derive accept_tissues from the triage context when not supplied.
-#' primary_tissue and context_tissue share the hpa_tissue namespace, so no
-#' name bridge is needed. Returns NULL when no context tissue applies,
-#' meaning primary tissue is not checked.
+#' Returns a list, one element per row: NULL where no context tissue
+#' applies (primary tissue is not checked), otherwise the accepted set for
+#' that row's context. Long output from triage() carries a context_tissue
+#' column and each row uses its own; single-context output uses the
+#' attribute. primary_tissue and context_tissue share the hpa_tissue
+#' namespace, so no name bridge is needed.
 #' @keywords internal
 #' @noRd
 .resolve_accept_tissues <- function(df, accept_tissues) {
+  n <- nrow(df)
   if (!is.null(accept_tissues)) {
     if (!is.character(accept_tissues) || length(accept_tissues) == 0L)
       stop("`accept_tissues` must be a character vector.", call. = FALSE)
-    return(accept_tissues)
+    return(rep(list(accept_tissues), n))
   }
+  expand <- function(t) if (is.null(t)) NULL
+                        else if (t %in% .BRAIN_REGIONS) .BRAIN_REGIONS else t
+  if ("context_tissue" %in% names(df))
+    return(lapply(as.character(df$context_tissue), expand))
   ctx <- attr(df, "triage_context")
-  if (is.null(ctx) || is.null(ctx$context_tissue)) return(NULL)
-  if (ctx$context_tissue %in% .BRAIN_REGIONS) return(.BRAIN_REGIONS)
-  ctx$context_tissue
+  if (is.null(ctx) || is.null(ctx$context_tissue)) return(rep(list(NULL), n))
+  rep(list(expand(ctx$context_tissue[1L])), n)
 }
 
 #' Whether any tissue in a comma-joined primary_tissue set is accepted.
-#' NA and "multiple" give FALSE.
+#' accept is a list, one element per row; NULL means not checked.
+#' NA and "multiple" give FALSE when checked.
 #' @keywords internal
 #' @noRd
-.primary_in <- function(primary_tissue, accept_tissues) {
-  if (is.null(accept_tissues)) return(rep(TRUE, length(primary_tissue)))
-  vapply(strsplit(as.character(primary_tissue), ", ", fixed = TRUE),
-         function(x) !anyNA(x) && any(x %in% accept_tissues), logical(1))
+.primary_in <- function(primary_tissue, accept) {
+  sets <- strsplit(as.character(primary_tissue), ", ", fixed = TRUE)
+  vapply(seq_along(sets), function(i) {
+    if (is.null(accept[[i]])) return(TRUE)
+    x <- sets[[i]]
+    !anyNA(x) && any(x %in% accept[[i]])
+  }, logical(1))
 }
 
 #' Per-gate pass conditions as a logical matrix (rows genes, cols gates).

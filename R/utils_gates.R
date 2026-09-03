@@ -112,34 +112,38 @@
   sample_type
 }
 
-#' Validate a user-supplied tissue name against a character vocabulary.
+#' Validate user-supplied tissue names against a character vocabulary.
 #'
-#' @param context_tissue Character scalar.
+#' @param context_tissue Character vector.
 #' @param valid_tissues Character vector of permitted names, typically
 #'   \code{unique(hpa_tissue$tissue)}.
-#' @return Canonical tissue string.
+#' @return Character vector of canonical tissue names, input order,
+#'   duplicates dropped.
 #' @keywords internal
 #' @noRd
 .validate_context_tissue <- function(context_tissue, valid_tissues) {
 
-  if (!is.character(context_tissue) || length(context_tissue) != 1L)
-    stop("`context_tissue` must be a single character string.", call. = FALSE)
+  if (!is.character(context_tissue) || length(context_tissue) == 0L ||
+      anyNA(context_tissue))
+    stop("`context_tissue` must be a character vector with no NA.", call. = FALSE)
   if (!is.character(valid_tissues))
     stop("`valid_tissues` must be a character vector.", call. = FALSE)
 
-  key <- tolower(trimws(context_tissue))
+  keys <- tolower(trimws(context_tissue))
 
-  if (key == "brain")
-    stop("The atlas resolves brain into regions; specify one directly, e.g. ",
+  if (any(keys == "brain"))
+    stop("The atlas resolves brain into regions; specify them directly, e.g. ",
          paste(.BRAIN_REGIONS, collapse = ", "), ". Aggregating them is ",
          "left to the user.", call. = FALSE)
 
-  hit <- which(tolower(valid_tissues) == key)
-  if (length(hit) >= 1L) return(valid_tissues[hit[1L]])
+  hit <- match(keys, tolower(valid_tissues))
+  if (anyNA(hit))
+    stop("`context_tissue` value(s) not found: ",
+         paste(context_tissue[is.na(hit)], collapse = ", "), ". ",
+         "Available tissues: ", paste(sort(valid_tissues), collapse = ", "), ".",
+         call. = FALSE)
 
-  stop("`context_tissue` value '", context_tissue, "' not found. ",
-       "Available tissues: ", paste(sort(valid_tissues), collapse = ", "), ".",
-       call. = FALSE)
+  unique(valid_tissues[hit])
 }
 
 

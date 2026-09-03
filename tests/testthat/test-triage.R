@@ -88,7 +88,7 @@ test_that("SPANXA1 in CSF: nuclear via the shared UniProt entry, one IHC hit rea
   # One IHC detection (Testis), bulk detects it in 1 of 12 covered tissues:
   # restriction is consistent across platforms but the evidence is thin.
   expect_equal(res$specificity, "sparse")
-  expect_true(is.na(res$primary_tissue))
+  expect_equal(res$primary_tissue, "Testis")
 })
 
 test_that("one IHC hit contradicted by broad bulk detection reads na", {
@@ -129,6 +129,39 @@ test_that("Brain is rejected with a directed message", {
                "regions")
 })
 
+test_that("several context tissues give long output with a context_tissue column", {
+  regions <- c("Cerebral cortex", "Hippocampus", "Liver")
+  res <- triage(c("NEFL", "GFAP"), sample_type = "csf", context_tissue = regions)
+  expect_equal(nrow(res), 6L)
+  expect_equal(names(res)[1:2], c("gene_symbol", "context_tissue"))
+  expect_equal(res$context_tissue, rep(regions, each = 2))
+  expect_equal(res$gene_symbol, rep(c("NEFL", "GFAP"), 3))
+  # Context-independent gates repeat across a gene's rows
+  for (g in c("NEFL", "GFAP")) {
+    sub <- res[res$gene_symbol == g, ]
+    expect_length(unique(sub$route), 1L)
+    expect_length(unique(sub$specificity), 1L)
+    expect_length(unique(sub$primary_tissue), 1L)
+  }
+  # Each block equals the single-context call
+  for (r in regions) {
+    single <- triage(c("NEFL", "GFAP"), sample_type = "csf", context_tissue = r)
+    block <- res[res$context_tissue == r, setdiff(names(res), "context_tissue")]
+    rownames(block) <- NULL
+    expect_equal(block, single, ignore_attr = TRUE)
+  }
+  expect_equal(attr(res, "triage_context")$context_tissue, regions)
+})
+
+test_that("duplicate context tissues collapse and one bad name fails the call", {
+  res <- triage("NEFL", sample_type = "csf",
+                context_tissue = c("cerebral cortex", "Cerebral cortex"))
+  expect_equal(nrow(res), 1L)
+  expect_false("context_tissue" %in% names(res))
+  expect_error(triage("NEFL", sample_type = "csf",
+                      context_tissue = c("Cerebral cortex", "Mars")), "Mars")
+})
+
 test_that("unknown context_tissue errors and lists the vocabulary", {
   expect_error(triage("NEFL", sample_type = "csf", context_tissue = "Mars"),
                "not found")
@@ -141,9 +174,10 @@ test_that("urine implies Kidney", {
   expect_equal(attr(res, "triage_context")$context_tissue, "Kidney")
   expect_true(res$tissue != "systemic_na")
   # Two IHC hits (Kidney, Liver), bulk in 11 of 24: below the detection
-  # floor and not contradicted, so sparse with no primary tissue.
+  # floor and not contradicted, so sparse. The set is reported so the
+  # caution can be read; Kidney is the only tissue at the maximum level.
   expect_equal(res$specificity, "sparse")
-  expect_true(is.na(res$primary_tissue))
+  expect_equal(res$primary_tissue, "Kidney")
 })
 
 # -----------------------------------------------------------------------------

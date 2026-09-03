@@ -12,8 +12,10 @@ audit_call(df, accept_tissues = NULL)
 \item{accept_tissues}{Character vector of HPA tissue names. A specific
 gene passes the tissue check if any tissue in its \code{primary_tissue}
 set is in this vector. Default \code{NULL} derives it from the context
-tissue stored in \code{df}, expanded to all brain regions when the
-context is one of them. Ignored when no context tissue was given.}
+tissue, per row when \code{df} has a \code{context_tissue} column and
+from the \code{triage_context} attribute otherwise, expanded to all
+brain regions when the context is one of them. Ignored when no context
+tissue was given.}
 }
 \value{
 A factor with levels \code{"accept"}, \code{"caution"},

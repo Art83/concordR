@@ -14,8 +14,10 @@ triage(genes, sample_type, context_tissue = NULL, details = FALSE)
 \code{"tissue"}, \code{"cell_lysate"}, \code{"nuclear_fraction"},
 \code{"mitochondrial_fraction"}, \code{"membrane_fraction"}.}
 
-\item{context_tissue}{Character or \code{NULL}. Tissue the claim is
-about. Overrides automatic inference.}
+\item{context_tissue}{Character vector or \code{NULL}. Tissue(s) the
+claim is about. Overrides automatic inference. With more than one
+tissue the output is long: one row per gene per tissue, with a
+\code{context_tissue} column after \code{gene_symbol}.}
 
 \item{details}{Logical. When \code{TRUE}, append the evidence behind each
 gate (\code{ensembl_id}, \code{gene_class}, \code{protein_confidence},
@@ -25,11 +27,12 @@ counts, \code{tau}, \code{protein_breadth}, \code{localisation},
 \code{FALSE}.}
 }
 \value{
-A data frame with one row per input gene, in input order. Six
+A data frame with one row per input gene, in input order (one
+row per gene per tissue when several context tissues are given). Six
 columns by default: \code{gene_symbol}, \code{concordance},
 \code{tissue}, \code{route}, \code{specificity},
-\code{primary_tissue}. The resolved sample type and context tissue are
-stored in the \code{"triage_context"} attribute.
+\code{primary_tissue}. The resolved sample type and context tissue(s)
+are stored in the \code{"triage_context"} attribute.
 }
 \description{
 Scores each gene on four independent gates and returns one column per
@@ -81,11 +84,13 @@ restricted, \code{"na"} when the gene has no reliable IHC anywhere
 or when its few IHC hits are contradicted by broad bulk detection
 (the antibody is uninformative for this gene). RNA is not used in
 this gate.}
-\item{\code{primary_tissue}}{For specific genes, the set of HPA
-tissues tied at the gene's highest IHC level, alphabetical and
+\item{\code{primary_tissue}}{For specific and sparse genes, the set of
+HPA tissues tied at the gene's highest IHC level, alphabetical and
 comma-joined. A single winner is undefined for most genes (median
-six tissues share the maximum), so the set is reported.
-\code{"multiple"} for broad genes. \code{NA} for sparse and na.}
+six tissues share the maximum), so the set is reported. For sparse
+genes the set is where IHC found the protein at all; it is shown so
+the caution can be read, and never used to decline.
+\code{"multiple"} for broad genes. \code{NA} for na.}
 }
 }
 
@@ -108,6 +113,10 @@ triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf")
 # CSF against a named brain region
 triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf",
        context_tissue = "Cerebral cortex")
+
+# Several regions at once, long output
+triage("NEFL", sample_type = "csf",
+       context_tissue = c("Cerebral cortex", "Hippocampus", "Cerebellum"))
 
 # Evidence behind the gates
 triage("NEFL", sample_type = "csf", details = TRUE)

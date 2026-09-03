@@ -42,7 +42,8 @@ remotes::install_github("Art83/concordR")
 | `audit_call()` | Accept, caution, or decline from the gate columns. |
 | `funnel_class()` | First failing gate in a stated order, with an optional survivor table. |
 | `query_atlas()` | Gene-level lookup: concordance class, suppression rate, mechanistic tier. |
-| `query_tissue()` | Tissue-resolved lookup: per-tissue concordance and protein evidence. |
+| `query_tissue()` | Tissue-resolved lookup: per-tissue concordance and protein evidence (24 atlas tissues). |
+| `query_presence()` | Protein presence vote across the 59 HPA tissues, the tissue gate's source. |
 | `plot_gene()` | Tissue-resolved concordance profile for one gene. |
 | `load_atlas()` | Load the atlas objects (cached, called internally). |
 
@@ -58,12 +59,19 @@ triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf")
 res <- triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf",
               context_tissue = "Cerebral cortex")
 
+# 2b. Or several regions at once (long output, one row per gene per region)
+triage("NEFL", sample_type = "csf",
+       context_tissue = c("Cerebral cortex", "Hippocampus", "Cerebellum"))
+
 # 3. Combine the gates
 res$call <- audit_call(res)
 funnel_class(res, table = TRUE)
 
 # 4. Evidence behind each gate
 triage("NEFL", sample_type = "csf", details = TRUE)
+
+# 4b. The presence vote for a gene across every HPA tissue
+query_presence("NEFL")
 
 # 5. Visualise a gene's tissue profile
 plot_gene("TREM2")

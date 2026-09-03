@@ -52,11 +52,13 @@
 #'     or when its few IHC hits are contradicted by broad bulk detection
 #'     (the antibody is uninformative for this gene). RNA is not used in
 #'     this gate.}
-#'   \item{\code{primary_tissue}}{For specific genes, the set of HPA
-#'     tissues tied at the gene's highest IHC level, alphabetical and
+#'   \item{\code{primary_tissue}}{For specific and sparse genes, the set of
+#'     HPA tissues tied at the gene's highest IHC level, alphabetical and
 #'     comma-joined. A single winner is undefined for most genes (median
-#'     six tissues share the maximum), so the set is reported.
-#'     \code{"multiple"} for broad genes. \code{NA} for sparse and na.}
+#'     six tissues share the maximum), so the set is reported. For sparse
+#'     genes the set is where IHC found the protein at all; it is shown so
+#'     the caution can be read, and never used to decline.
+#'     \code{"multiple"} for broad genes. \code{NA} for na.}
 #' }
 #'
 #' @section Tissue inference:
@@ -73,8 +75,10 @@
 #'   \code{"plasma"}, \code{"serum"}, \code{"csf"}, \code{"urine"},
 #'   \code{"tissue"}, \code{"cell_lysate"}, \code{"nuclear_fraction"},
 #'   \code{"mitochondrial_fraction"}, \code{"membrane_fraction"}.
-#' @param context_tissue Character or \code{NULL}. Tissue the claim is
-#'   about. Overrides automatic inference.
+#' @param context_tissue Character vector or \code{NULL}. Tissue(s) the
+#'   claim is about. Overrides automatic inference. With more than one
+#'   tissue the output is long: one row per gene per tissue, with a
+#'   \code{context_tissue} column after \code{gene_symbol}.
 #' @param details Logical. When \code{TRUE}, append the evidence behind each
 #'   gate (\code{ensembl_id}, \code{gene_class}, \code{protein_confidence},
 #'   \code{suppression_rate}, \code{protein_tau}, IHC and bulk detection
@@ -82,11 +86,12 @@
 #'   \code{n_platforms_context}, \code{mechanism_tier}). Default
 #'   \code{FALSE}.
 #'
-#' @return A data frame with one row per input gene, in input order. Six
+#' @return A data frame with one row per input gene, in input order (one
+#'   row per gene per tissue when several context tissues are given). Six
 #'   columns by default: \code{gene_symbol}, \code{concordance},
 #'   \code{tissue}, \code{route}, \code{specificity},
-#'   \code{primary_tissue}. The resolved sample type and context tissue are
-#'   stored in the \code{"triage_context"} attribute.
+#'   \code{primary_tissue}. The resolved sample type and context tissue(s)
+#'   are stored in the \code{"triage_context"} attribute.
 #'
 #' @examples
 #' \dontrun{
@@ -96,6 +101,10 @@
 #' # CSF against a named brain region
 #' triage(c("NEFL", "GFAP", "SPANXA1"), sample_type = "csf",
 #'        context_tissue = "Cerebral cortex")
+#'
+#' # Several regions at once, long output
+#' triage("NEFL", sample_type = "csf",
+#'        context_tissue = c("Cerebral cortex", "Hippocampus", "Cerebellum"))
 #'
 #' # Evidence behind the gates
 #' triage("NEFL", sample_type = "csf", details = TRUE)
@@ -129,62 +138,68 @@ triage <- function(genes, sample_type, context_tissue = NULL,
   q <- .join_localisation(q)
   n <- nrow(q)
 
-  # --- Context tissue (hpa_tissue namespace) ---
-  target <- if (!is.null(context_tissue))
+  # --- Context tissues (hpa_tissue namespace) ---
+  # One or more. With several, the output is long: one row per gene per
+  # tissue, with a context_tissue column. Only the tissue gate and the
+  # cross-platform clause of concordance depend on context.
+  targets <- if (!is.null(context_tissue))
     .validate_context_tissue(context_tissue, unique(hpa$tissue))
   else
     .SAMPLE_TISSUE_MAP[[sample_type]]
+  multi <- length(targets) > 1L
+  if (is.null(targets)) targets <- list(NULL)
 
-  # --- Gate: tissue ---
-  tis <- .gate_tissue(q, hpa, target)
-
-  # --- Cross-platform agreement in the context tissue ---
-  cross_agree <- .cross_platform_agree(q, ta, target)
-
-  # --- Gate: concordance ---
-  concordance <- .gate_concordance(q, sample_type, tis$n_platforms,
-                                   cross_agree, thr)
-
-  # --- Gate: route ---
+  # --- Context-independent gates ---
   route <- .gate_route(q, sample_type)
-
-  # --- Gate: specificity and primary tissue ---
   spec <- .gate_specificity(q, thr)
   primary <- .primary_tissue(q, spec)
 
-  # --- Assemble ---
-  out <- data.frame(
-    gene_symbol = q$gene_symbol,
-    concordance = concordance,
-    tissue = tis$call,
-    route = route,
-    specificity = spec,
-    primary_tissue = primary,
-    stringsAsFactors = FALSE
-  )
+  # --- Context-dependent gates, per target ---
+  blocks <- lapply(targets, function(target) {
+    tis <- .gate_tissue(q, hpa, target)
+    disagree <- .platforms_disagree(q, ta, target)
+    concordance <- .gate_concordance(q, sample_type, tis$n_platforms,
+                                     disagree, thr)
+    out <- data.frame(
+      gene_symbol = q$gene_symbol,
+      concordance = concordance,
+      tissue = tis$call,
+      route = route,
+      specificity = spec,
+      primary_tissue = primary,
+      stringsAsFactors = FALSE
+    )
+    if (multi)
+      out <- cbind(out[1L], context_tissue = rep(target, n), out[-1L],
+                   stringsAsFactors = FALSE)
 
-  if (details) {
-    pick <- function(col) if (col %in% names(q)) q[[col]] else rep(NA, n)
-    out$ensembl_id <- pick("ensembl_id")
-    out$gene_class <- pick("gene_class")
-    out$protein_confidence <- pick("protein_confidence")
-    out$suppression_rate <- pick("suppression_rate")
-    out$protein_tau <- pick("protein_tau")
-    out$n_tissues_ihc <- pick("n_tissues_ihc")
-    out$n_tissues_ihc_detected <- pick("n_tissues_ihc_detected")
-    out$n_primary_tissues <- pick("n_primary_tissues")
-    out$n_tissues_bulk_detected <- pick("n_tissues_bulk_detected")
-    out$n_tissues_bulk_covered <- pick("n_tissues_bulk_covered")
-    out$tau <- pick("tau")
-    out$protein_breadth <- pick("protein_breadth")
-    out$localisation <- .location_labels(q)
-    out$n_platforms_context <- tis$n_platforms
-    out$mechanism_tier <- pick("mechanism_tier")
-  }
+    if (details) {
+      pick <- function(col) if (col %in% names(q)) q[[col]] else rep(NA, n)
+      out$ensembl_id <- pick("ensembl_id")
+      out$gene_class <- pick("gene_class")
+      out$protein_confidence <- pick("protein_confidence")
+      out$suppression_rate <- pick("suppression_rate")
+      out$protein_tau <- pick("protein_tau")
+      out$n_tissues_ihc <- pick("n_tissues_ihc")
+      out$n_tissues_ihc_detected <- pick("n_tissues_ihc_detected")
+      out$n_primary_tissues <- pick("n_primary_tissues")
+      out$n_tissues_bulk_detected <- pick("n_tissues_bulk_detected")
+      out$n_tissues_bulk_covered <- pick("n_tissues_bulk_covered")
+      out$tau <- pick("tau")
+      out$protein_breadth <- pick("protein_breadth")
+      out$localisation <- .location_labels(q)
+      out$n_platforms_context <- tis$n_platforms
+      out$mechanism_tier <- pick("mechanism_tier")
+    }
+    out
+  })
 
+  out <- do.call(rbind, blocks)
   rownames(out) <- NULL
-  attr(out, "triage_context") <- list(sample_type    = sample_type,
-                                      context_tissue = target)
+  attr(out, "triage_context") <- list(
+    sample_type    = sample_type,
+    context_tissue = if (is.null(targets[[1L]])) NULL else unlist(targets)
+  )
   out
 }
 
@@ -248,25 +263,26 @@ triage <- function(genes, sample_type, context_tissue = NULL,
 # Gate: concordance
 # =============================================================================
 
-#' Mean platforms_agree for each gene in the context tissue (tissue_atlas).
-#' NA when no context tissue, no atlas counterpart, or no row.
+#' Whether the atlas and GTEx disagree on the gene in the context tissue
+#' (tissue_atlas$platforms_agree == FALSE). NA when no context tissue, no
+#' atlas counterpart, no row, or no GTEx coverage.
 #' @keywords internal
 #' @noRd
-.cross_platform_agree <- function(q, ta, target) {
+.platforms_disagree <- function(q, ta, target) {
   n <- nrow(q)
   atlas_tissue <- .to_atlas_tissue(target, ta)
   if (is.na(atlas_tissue) || !"platforms_agree" %in% names(ta) ||
       !"ensembl_id" %in% names(q))
-    return(rep(NA_real_, n))
+    return(rep(NA, n))
 
   sub <- ta[ta$ts_tissue == atlas_tissue, , drop = FALSE]
   idx <- match(q$ensembl_id, sub$ensembl_id)
-  as.numeric(sub$platforms_agree[idx])
+  !as.logical(sub$platforms_agree[idx])
 }
 
 #' @keywords internal
 #' @noRd
-.gate_concordance <- function(q, sample_type, n_platforms, cross_agree, thr) {
+.gate_concordance <- function(q, sample_type, n_platforms, disagree, thr) {
   n <- nrow(q)
   gc <- if ("gene_class" %in% names(q)) as.character(q$gene_class)
         else rep(NA_character_, n)
@@ -286,9 +302,9 @@ triage <- function(genes, sample_type, context_tissue = NULL,
   blind <- sample_type %in% .BIOFLUID_TYPES &
            (flag("is_secreted") | flag("is_projection"))
 
-  # GTEx disagrees in the context tissue and several platforms
-  # detect the protein there
-  contradicted <- !is.na(cross_agree) & cross_agree < thr$cross_platform_agree_max &
+  # GTEx contradicts the suppressed call in the context tissue and the bulk
+  # platforms detect the protein there
+  contradicted <- disagree %in% TRUE &
                   !is.na(n_platforms) & n_platforms >= thr$n_platforms_min
 
   out[suppressed & (blind | contradicted)] <- "suppressed_unconfirmed"
@@ -329,14 +345,17 @@ triage <- function(genes, sample_type, context_tissue = NULL,
 }
 
 #' Tissues tied at the gene's maximum IHC level (HPA names, comma-joined),
-#' computed at prep. "multiple" for broad genes, NA for sparse and na.
+#' computed at prep. Reported for specific and sparse genes: for sparse the
+#' set is thin evidence but still a fact about where IHC found the protein,
+#' and audit_call() never declines on it. "multiple" for broad genes, NA
+#' for na.
 #' @keywords internal
 #' @noRd
 .primary_tissue <- function(q, spec) {
   n <- nrow(q)
   out <- rep(NA_character_, n)
   out[spec == "broad"] <- "multiple"
-  want <- spec == "specific"
+  want <- spec %in% c("specific", "sparse")
   if (any(want) && "primary_tissue_ihc" %in% names(q))
     out[want] <- as.character(q$primary_tissue_ihc[want])
   out

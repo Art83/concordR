@@ -54,6 +54,10 @@ test_that("caution for the intermediate values", {
   expect_equal(as.character(audit_call(full("A", route = "unmatched"))), "caution")
   expect_equal(as.character(audit_call(full("A", spec = "broad", primary = "multiple"))), "caution")
   expect_equal(as.character(audit_call(full("A", spec = "sparse", primary = NA))), "caution")
+  # A sparse gene's set is reported but never declined on, even when it
+  # excludes the context tissue
+  expect_equal(as.character(audit_call(full("A", spec = "sparse", primary = "Testis"))), "caution")
+  expect_equal(as.character(audit_call(full("A", spec = "sparse", primary = "Cerebral cortex"))), "caution")
   expect_equal(as.character(audit_call(full("A", spec = "na", primary = NA))), "caution")
   expect_equal(as.character(audit_call(full("A", tissue = "detected_1platform"))), "caution")
   expect_equal(as.character(audit_call(full("A", tissue = "discordant"))), "caution")
@@ -139,6 +143,20 @@ test_that("funnel_class table has one row per stage and conserves counts", {
 # -----------------------------------------------------------------------------
 # Invariant: pass in the funnel is accept in audit_call
 # -----------------------------------------------------------------------------
+
+test_that("long output uses each row's own context tissue", {
+  res <- triage(c("NEFL", "GFAP", "ALB"), sample_type = "csf",
+                context_tissue = c("Cerebral cortex", "Liver"))
+  calls <- audit_call(res)
+  expect_length(calls, 6L)
+  # Same as calling each context separately
+  for (r in c("Cerebral cortex", "Liver")) {
+    single <- audit_call(triage(c("NEFL", "GFAP", "ALB"), sample_type = "csf",
+                                context_tissue = r))
+    expect_equal(as.character(calls[res$context_tissue == r]), as.character(single))
+  }
+  expect_equal(funnel_class(res) == "pass", calls == "accept")
+})
 
 test_that("funnel pass equals audit accept on real triage output", {
   genes <- c("NEFL", "GFAP", "SPANXA1", "APOE", "APP", "MAPT", "SNCA",
