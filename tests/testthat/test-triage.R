@@ -79,10 +79,12 @@ test_that("secreted and membrane routes are read from the flags", {
   expect_true(res$route[2] %in% c("secreted", "membrane"))
 })
 
-test_that("SPANXA1 in CSF: absent from localisation flags reads unknown, one IHC hit reads sparse", {
+test_that("SPANXA1 in CSF: nuclear via the shared UniProt entry, one IHC hit reads sparse", {
   res <- triage("SPANXA1", sample_type = "csf")
   expect_equal(res$concordance, "low_expression")
-  expect_equal(res$route, "unknown")
+  # SPANXA1 and SPANXA2 encode one protein and share a UniProt entry. The
+  # localisation build expands the entry to both Ensembl IDs.
+  expect_equal(res$route, "intracellular")
   # One IHC detection (Testis), bulk detects it in 1 of 12 covered tissues:
   # restriction is consistent across platforms but the evidence is thin.
   expect_equal(res$specificity, "sparse")
@@ -162,8 +164,9 @@ test_that("subcellular fractions report matched or unmatched", {
   # HDAC1 is nuclear
   res <- triage("HDAC1", sample_type = "nuclear_fraction")
   expect_equal(res$route, "matched")
-  # Unknown localisation stays unknown in any fraction
-  res <- triage("SPANXA1", sample_type = "nuclear_fraction")
+  # Unknown localisation stays unknown in any fraction. Readthrough loci
+  # have no UniProt entry.
+  res <- triage("NME1-NME2", sample_type = "nuclear_fraction")
   expect_equal(res$route, "unknown")
 })
 

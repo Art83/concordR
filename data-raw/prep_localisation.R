@@ -1,17 +1,10 @@
 # =============================================================================
 # prep_localisation.R
 # Builds localisation_uniprot.csv from a UniProt export and an Ensembl to
-# UniProt map. Run before prep_atlas_data.R when either input changes.
+# UniProt map.
 # =============================================================================
-# Inputs
-#   UNIPROT_TSV: UniProt export, reviewed human, with at least the columns
-#                Entry, Gene Names, Subcellular location [CC]
-#   MAP_TSV:     Ensembl BioMart export with Gene stable ID, UniProtKB/Swiss-Prot
-#                ID, HGNC symbol
-# Output
-#   LOC_CSV, one row per Ensembl gene ID, with the is_* flags.
 #
-# One UniProt entry maps to several Ensembl IDs whenever a protein is
+# Note: One UniProt entry maps to several Ensembl IDs whenever a protein is
 # encoded by a gene family (histone clusters, CT47A, GAGE, SPANX, SSX,
 # defensins) or sits on an alternative haplotype (MHC region). The join
 # below produces one row per (Entry, Ensembl ID) and keeps all of them.
@@ -21,28 +14,54 @@
 
 suppressPackageStartupMessages(library(dplyr))
 
-UNIPROT_TSV <- "D:/Bioinformatics_projects/hpa_to_tabula/external_data/uniprot_localisation.tsv"
+UNIPROT_TSV <- "D:/Bioinformatics_projects/hpa_to_tabula/external_data/uniprotkb_AND_model_organism_9606_2026_05_26.tsv"
 MAP_TSV     <- "D:/Bioinformatics_projects/hpa_to_tabula/external_data/ensembl_uniprot_map.tsv"
 LOC_CSV     <- "D:/Bioinformatics_projects/localisation_uniprot.csv"
 
 uniprot <- read.delim(UNIPROT_TSV, stringsAsFactors = FALSE, check.names = TRUE)
 map     <- read.delim(MAP_TSV,     stringsAsFactors = FALSE, check.names = TRUE)
 
-stopifnot(all(c("Entry", "Subcellular.location..CC.") %in% names(uniprot)))
+stopifnot(all(c("Entry", "Gene.Names", "Subcellular.location..CC.") %in% names(uniprot)))
 colnames(map)[2] <- "Entry"
 stopifnot(all(c("Gene.stable.ID", "Entry", "HGNC.symbol") %in% names(map)))
 
 flag <- function(x, pattern) as.integer(grepl(pattern, x, ignore.case = TRUE))
 
+has_reviewed <- "Reviewed" %in% names(uniprot)
+if (!has_reviewed)
+  cat("NOTE: export has no Reviewed column. Symbol pass disabled: it would admit\n",
+      "      TrEMBL fragments. Add 'Reviewed' to the UniProt export columns.\n")
+
 uniprot_loc <- uniprot %>%
   dplyr::rename(location = Subcellular.location..CC.) %>%
-  dplyr::select(Entry, location) %>%
-  inner_join(map, by = "Entry", relationship = "many-to-many") %>%
+  mutate(gene_primary = sub("[ ;].*$", "", trimws(Gene.Names)),
+         reviewed = if (has_reviewed) tolower(Reviewed) == "reviewed" else NA) %>%
+  dplyr::select(Entry, gene_primary, location, reviewed)
+
+# Pass 1: by accession (the map's UniProt column is Swiss-Prot, so this is
+# reviewed only). Pass 2: entries with no accession match, by primary gene
+# name against the map's HGNC symbol, restricted to reviewed entries when
+# the export says which are. BioMart and UniProt do not always agree on
+# which accession represents a gene, and the second pass recovers reviewed
+# entries the first misses for that reason.
+by_acc <- uniprot_loc %>%
+  inner_join(map, by = "Entry", relationship = "many-to-many")
+by_sym <- uniprot_loc %>%
+  filter(has_reviewed, !Entry %in% by_acc$Entry, nzchar(gene_primary),
+         reviewed %in% TRUE) %>%
+  inner_join(map %>% dplyr::select(-Entry) %>% distinct(),
+             by = c("gene_primary" = "HGNC.symbol"),
+             relationship = "many-to-many") %>%
+  mutate(HGNC.symbol = gene_primary)
+cat("matched by accession:", length(unique(by_acc$Entry)),
+    " by symbol:", length(unique(by_sym$Entry)), "\n")
+
+uniprot_loc <- bind_rows(by_acc, by_sym) %>%
   mutate(
     is_secreted = flag(location, "Secreted"),
-    is_membrane = flag(location, "Cell membrane|Single-pass|Multi-pass"),
+    is_membrane = flag(location, "Cell membrane|Single-pass|Multi-pass|Cell surface|GPI-anchor"),
     is_nuclear = flag(location, "Nucleus|Nucleoplasm|Nucleolus|Nuclei"),
-    is_cytoplasmic = flag(location, "Cytoplasm"),
+    is_cytoplasmic = flag(location, "Cytoplasm|Cytosol|Lysosome|Endosome|Peroxisome|Cytoplasmic vesicle|Sarcoplasmic reticulum"),
     is_mitochondrial = flag(location, "Mitochondri"),
     is_er_golgi = flag(location, "Endoplasmic reticulum|Golgi"),
     is_cytoskeleton  = flag(location, "Cytoskeleton|Microtubule"),
