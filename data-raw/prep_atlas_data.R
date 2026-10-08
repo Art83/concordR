@@ -10,7 +10,7 @@ library(tidyr)
 
 # ---- Paths -----------------------------------------------------------------
 # These are all outputs from companion paper on rna to protein concordance
-PROJECT_ROOT  <- "D:/Bioinformatics_projects/hpa_to_tabula"
+PROJECT_ROOT  <- "D:/Bioinformatics_projects/hpa_to_tabula_rev"
 ATLAS_CSV <- file.path(PROJECT_ROOT, "results/ml/gene_discordance_profiles.csv")
 TIER_CSV <- file.path(PROJECT_ROOT, "results/tables/three_way_decomposition.csv")
 PARQUET_DIR <- file.path(PROJECT_ROOT, "results/ml")
